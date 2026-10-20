@@ -453,7 +453,104 @@ própria sessão.
 O expire_on_commit=False mantém os dados dos objetos em memória depois do
 commit. O padrão ( True ) apagaria esses dados e forçaria uma nova consulta ao acessar
 user.email , de novo causando MissingGreenlet em código async.
-A função get_session usa yield , o que a torna um gerador. O FastAPI executa o código até o yield , entrega a sessão ao endpoint, e quando a requisição termina continua depois do yield . O async with garante que a sessão seja fechada mesmo se der erro.
+A função get_session usa yield , o que a torna um gerador. O FastAPI executa o código
+até o yield , entrega a sessão ao endpoint, e quando a requisição termina continua
+depois do yield . O async with garante que a sessão seja fechada mesmo se der erro.
 Verificação: por que existe uma engine para toda a aplicação, mas uma sessão por
 requisição? O que aconteceria se duas requisições simultâneas compartilhassem a
 mesma sessão?
+
+
+
+### Capítulo 9: Os models e o relacionamento N:N
+
+```text
+...
+├── src/                        # Diretório que contém o código-fonte
+│   └── fastapi_aisili/         # Pacote Python da aplicação
+│       ├──__init__.py
+        └── models/ 
+            ├── .py  
+            └── .py
+...
+```
+
+
+Arquivos em app/models/ . Um model é uma classe Python que representa uma tabela;
+cada instância é uma linha. O requisito central aqui é: um usuário pode ter vários perfis, e um perfil pode pertencer a vários usuários. Isso é um relacionamento muitos-para-muitos (N:N).
+Por que N:N precisa de uma terceira tabela
+Num banco relacional, uma célula guarda um valor só. Não dá para guardar "admin,
+financeiro" numa coluna profiles de users sem perder integridade. A solução é uma
+tabela de associação, onde cada linha diz "o usuário X tem o perfil Y":
+
+| user_id |profile_id|
+|--|--|
+|Maria| user|
+|Maria| fianaceiro|
+|João|user|
+|João|admin|
+
+Maria tem dois perfis; o perfil user tem dois usuários. Esse é todo o segredo do N:N.
+
+#### A tabela de associação
+
+```python
+user_profiles = Table(
+    "user_profiles",
+    Base.metadata,
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("profile_id", ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True),
+)
+```
+
+Note que não é uma classe, e sim um objeto Table . Como ela só liga duas tabelas e não tem dados próprios, não precisa de model. Os pontos importantes:
+
+* **Chave primária composta** ( user_id + profile_id ): o banco impede que o mesmo
+perfil seja vinculado duas vezes ao mesmo usuário.
+* **ForeignKey** garante que só existam IDs válidos. Não é possível vincular um perfil que não existe.
+* **ondelete="CASCADE"**: se um perfil for excluído, as linhas de vínculo somem junto, automaticamente, no próprio banco.
+
+#### O model Profile
+
+__tablename__ define o nome da tabela. unique=True impede dois perfis com o mesmo
+nome; index=True acelera buscas por nome. Como description é str | None , a
+coluna aceita valor vazio. O __repr__ só define como o objeto aparece ao ser impresso, útil para depurar.
+
+#### O model User
+
+Campo a campo:
+* email com 320 caracteres: é o tamanho máximo que a especificação de e-mail
+permite.
+* hashed_password : nunca guardamos a senha, só o hash. O nome do campo deixa isso explícito para quem lê.
+* is_active : permite desativar um usuário sem apagá-lo, preservando histórico.
+* is_superuser : um "passe livre" que ignora checagem de perfis.
+* token_version : um contador. Cada token JWT carrega o valor atual; ao trocar a senha, o contador sobe e todos os tokens antigos deixam de valer.
+
+#### O relationship: a parte mais importante
+
+profiles não é uma coluna. É um atributo que o SQLAlchemy preenche consultando a
+tabela user_profiles . Na prática, você trabalha com uma lista Python comum:
+
+```python
+user.profiles.append(perfil_financeiro) # cria uma linha em user_profiles
+user.profiles.remove(perfil_admin)      # apaga a linha correspondente
+await session.commit()
+```
+
+Os parâmetros:
+* **secondary=user_profiles** diz qual tabela de associação usar.
+* **lazy="selectin"** define quando os perfis são carregados. O padrão ( lazy="select" ) carrega só ao acessar user.profiles , mas em código async esse carregamento tardio é proibido e gera erro. Com selectin , ao buscar usuários o SQLAlchemy faz logo em seguida um segundo SELECT ... WHERE user_id IN (...) trazendo os perfis de todos de uma vez. São duas consultas no total, mesmo para 100 usuários, evitando o famoso problema N+1.
+* **order_by=Profile.name** devolve os perfis sempre em ordem alfabética, o que torna respostas e testes previsíveis.
+O método has_any_profile("admin", "gerente") usa *names para aceitar qualquer
+quantidade de argumentos. A expressão any(...) retorna True assim que encontra o
+primeiro perfil que bate. Colocar esse método no model mantém a lógica perto dos dados.
+
+#### O model PasswordResetToken
+
+Cada pedido de "esqueci minha senha" cria uma linha aqui. expires_at limita a validade; used_at marca quando foi usado, garantindo uso único. Guardamos token_hash (64 caracteres de um SHA-256) e não o token: se o banco vazar, os hashes não servem para redefinir senha de ninguém.
+
+#### O arquivo __init__.py dos models
+
+Esse arquivo parece inofensivo, mas é essencial. Uma tabela só entra no Base.metadata quando o módulo dela é importado. O Alembic faz from app import models , e esse __init__.py garante que todas as tabelas sejam registradas. Esquecer um import aqui faz o Alembic achar que a tabela não existe.
+Verificação: o que acontece no banco quando você faz user.profiles.append(p) e
+depois commit() ? Por que lazy="selectin" e não o padrão?
