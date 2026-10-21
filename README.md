@@ -475,7 +475,6 @@ mesma sessão?
 ...
 ```
 
-
 Arquivos em app/models/ . Um model é uma classe Python que representa uma tabela;
 cada instância é uma linha. O requisito central aqui é: um usuário pode ter vários perfis, e um perfil pode pertencer a vários usuários. Isso é um relacionamento muitos-para-muitos (N:N).
 Por que N:N precisa de uma terceira tabela
@@ -519,6 +518,7 @@ coluna aceita valor vazio. O __repr__ só define como o objeto aparece ao ser im
 #### O model User
 
 Campo a campo:
+
 * email com 320 caracteres: é o tamanho máximo que a especificação de e-mail
 permite.
 * hashed_password : nunca guardamos a senha, só o hash. O nome do campo deixa isso explícito para quem lê.
@@ -538,6 +538,7 @@ await session.commit()
 ```
 
 Os parâmetros:
+
 * **secondary=user_profiles** diz qual tabela de associação usar.
 * **lazy="selectin"** define quando os perfis são carregados. O padrão ( lazy="select" ) carrega só ao acessar user.profiles , mas em código async esse carregamento tardio é proibido e gera erro. Com selectin , ao buscar usuários o SQLAlchemy faz logo em seguida um segundo SELECT ... WHERE user_id IN (...) trazendo os perfis de todos de uma vez. São duas consultas no total, mesmo para 100 usuários, evitando o famoso problema N+1.
 * **order_by=Profile.name** devolve os perfis sempre em ordem alfabética, o que torna respostas e testes previsíveis.
@@ -554,3 +555,71 @@ Cada pedido de "esqueci minha senha" cria uma linha aqui. expires_at limita a va
 Esse arquivo parece inofensivo, mas é essencial. Uma tabela só entra no Base.metadata quando o módulo dela é importado. O Alembic faz from app import models , e esse __init__.py garante que todas as tabelas sejam registradas. Esquecer um import aqui faz o Alembic achar que a tabela não existe.
 Verificação: o que acontece no banco quando você faz user.profiles.append(p) e
 depois commit() ? Por que lazy="selectin" e não o padrão?
+
+### Capítulo 10: Migrations com Alembic
+
+Como já instalamos atraves do nosso pyproject, não será necessário utilizar o comando:
+
+```bash
+uv add alembic
+
+```
+
+Podemos utilizar diretamente o comando:
+
+```bash
+uv run alembic init alembic
+```
+
+O comando cria a estrutura necessária para gerenciar as migrações.
+
+```text
+...
+├── alembic/                        # Diretório que contém o código-fonte
+│   ├── versions/
+│   ├── env.py
+│   ├── README
+│   └── script.py.mako
+├── alembic.ini
+
+...
+```
+
+Arquivos: alembic.ini , alembic/env.py e alembic/versions/ . Uma migration é um
+script que altera a estrutura do banco (criar tabela, adicionar coluna) de forma
+versionada, como um commit do Git para o schema do banco.
+
+Por que não usar simplesmente create_all()?
+O SQLAlchemy tem Base.metadata.create_all() , que cria as tabelas que faltam. Mas
+ele nunca altera uma tabela existente. Se você adicionar a coluna phone ao User com o
+sistema já em produção, create_all não faz nada, e a aplicação quebra.
+Com o Alembic, cada mudança vira um arquivo numerado. O banco guarda numa tabela
+alembic_version qual foi a última migration aplicada, e alembic upgrade head aplica só
+as que faltam, em ordem. Todos os ambientes (seu computador, o do colega, produção)
+chegam ao mesmo schema.
+
+#### env.py assíncrono
+
+O env.py é o script que o Alembic executa em todo comando. Os pontos-chave:
+
+* **from app import models** registra todas as tabelas no metadata. O # noqa: F401 diz ao Ruff que o import "não usado" é proposital.
+* **target_metadata** é o que o Alembic compara com o banco real para descobrir
+diferenças.
+* **settings.database_url** faz a migration usar a mesma configuração do .env , sem
+duplicar a URL no alembic.ini .
+* **compare_type=True** faz o autogenerate detectar também mudanças de tipo, como
+String(50) para String(100) .
+* **NullPool** desliga o pool: a migration abre uma conexão, executa e fecha, sem
+conexões sobrando.
+* **run_sync** é a ponte entre os dois mundos. O Alembic internamente é síncrono, então pegamos a conexão async e pedimos para rodar uma função síncrona dentro dela.
+
+#### O fluxo de trabalho
+
+1. Altere um model, por exemplo adicionando phone: Mapped[str | None] em User .
+2. Gere a migration: alembic revision --autogenerate -m "add phone to users" (ou
+make migration m="add phone to users" ).
+3. **Abra e revise o arquivo gerado**. O autogenerate é ótimo, mas não é perfeito: ele não detecta renomeação de coluna (vê como "apagar uma e criar outra", perdendo dados).
+4. Aplique: alembic upgrade head.
+5. Para desfazer a última: alembic downgrade -1.
+
+
