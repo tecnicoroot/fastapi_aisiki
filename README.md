@@ -623,3 +623,133 @@ make migration m="add phone to users" ).
 5. Para desfazer a última: alembic downgrade -1.
 
 
+#### Capítulo 11: schemas pydantic
+
+Arquivos em app/schemas/ . Schemas são os contratos da API: descrevem exatamente o
+que pode entrar e o que vai sair. Eles são diferentes dos models, e essa separação é uma das ideias mais importantes do projeto.
+
+```text
+...
+├── src/                        # Diretório que contém o código-fonte
+│   └── fastapi_aisili/         # Pacote Python da aplicação
+│       ├──__init__.py
+│       └── schemas/ 
+│           ├── auth.py  
+│           ├── common.py  
+│           ├── __init__.py  
+│           ├── profile.py  
+│           └── user.py
+...
+```
+
+Por que não devolver o model direto?
+O model User tem hashed_password e token_version . Se o endpoint devolvesse o
+model sem filtro, esses campos iriam para o JSON. E se o cadastro aceitasse o model
+como entrada, um usuário malicioso poderia enviar "is_superuser": true e virar
+Page 17 of 52Apostila FastAPI Pro: entendendo o código passo a passo
+administrador.
+Por isso cada operação tem seu schema, com apenas os campos permitidos:
+
+|Schema|Uso|Campos|
+|--|--|--|
+|UserCreate|Entrada do cadastro|email, full_name, password|
+|UserUpdateMe|Usuário edita a si mesmo|full_name, email (opcionais)|
+|UserAdminUpdate|Admin edita outro usuário|full_name, is_active, is_superuser|
+|UserRead|Saída (resposta)|id, email, full_name, is_active, is_superuser,profiles, created_at|
+
+Repare: is_superuser só aparece no schema do admin, e password só aparece na entrada. UserRead não tem senha nem hash.
+
+#### Tipos reutilizáveis com Annotated
+
+```python
+NormalizedEmail = Annotated[EmailStr, AfterValidator(lambda v: v.lower())]
+Password = Annotated[str, Field(min_length=8, max_length=128)]
+FullName = Annotated[str, Field(min_length=2, max_length=255)]
+
+
+```
+
+Annotated[tipo, regras] cria um tipo com regras embutidas, que você declara uma vez
+e usa em vários lugares. Ler da esquerda para a direita:
+
+* **NormalizedEmail** : primeiro o EmailStr valida o formato; depois ( AfterValidator ) o
+valor é convertido para minúsculas. Assim Maria@Email.com e maria@email.com são o mesmo usuário.
+* **Password** : mínimo 8 caracteres. O máximo de 128 também importa: algoritmos de hash
+são lentos de propósito, e aceitar uma "senha" de 1 MB seria uma forma de derrubar o servidor.
+Se a regra falhar, o FastAPI devolve 422 com a lista de erros, sem que seu código seja executado.
+
+
+
+#### Schemas de entrada
+
+```python
+class UserCreate(BaseModel):
+    email: NormalizedEmail
+    full_name: FullName
+    password: Password
+class UserUpdateMe(BaseModel):
+    full_name: FullName | None = None
+    email: NormalizedEmail | None = None
+```
+Em UserUpdateMe , tudo é opcional porque é uma atualização parcial (método PATCH): o
+cliente manda só o que quer mudar. No service usamos data.model_dump(exclude_unset=True) , que gera um dicionário apenas com os campos enviados. Assim, mandar só {"full_name": "Ana"} não apaga o e-mail.
+
+#### Schemas de saída e from_attributes
+
+
+```python
+class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    email: EmailStr
+    profiles: list[ProfileRead]
+    created_at: datetime
+```
+
+Por padrão, o Pydantic constrói objetos a partir de dicionários. from_attributes=True
+permite construir a partir de qualquer objeto com atributos, como um model do
+SQLAlchemy. É isso que faz o endpoint funcionar quando retorna um User e declara
+response_model=UserRead : o FastAPI lê user.email , user.profiles e assim por diante,
+e descarta o resto.
+Note que profiles: list[ProfileRead] é um schema dentro de outro. O Pydantic
+converte cada Profile da lista automaticamente.
+
+#### Validação por expressão regular
+
+```python
+ProfileName = Annotated[str, Field(min_length=2, max_length=50,
+pattern=r"^[a-z][a-z0-9_-]*$")]
+
+```
+
+Nomes de perfil são usados no código ( require_profiles("financeiro") ), então
+precisam ser previsíveis. O pattern exige: começar com letra minúscula, seguida de
+letras, números, _ ou - . "Financeiro Geral" é rejeitado; "financeiro-geral" passa.
+
+#### Schema genérico de paginação
+
+```python
+class Page[T](BaseModel):
+    items: list[T]
+    total: int
+    page: int
+    size: int
+class PageParams(BaseModel):
+    page: int = Field(1, ge=1)
+    size: int = Field(20, ge=1, le=100)
+
+    @property
+    def offset(self) -> int:    
+        return (self.page - 1) * self.size
+
+```
+
+Page[T] usa a sintaxe de genéricos do Python 3.12: T é um "tipo a definir".
+Page[UserRead] é uma página de usuários, Page[ProfileRead] uma de perfis, com uma
+única classe. A documentação do Swagger mostra o formato correto para cada um.
+PageParams valida os parâmetros da URL: le=100 impede alguém de pedir 1 milhão de
+registros de uma vez. A propriedade offset converte "página 3 com 20 por página" em
+"pule 40 registros", que é o que o SQL entende.
+
+Verificação: por que UserCreate não tem o campo is_superuser ? O que
+exclude_unset=True evita numa requisição PATCH?
