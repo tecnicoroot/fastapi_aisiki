@@ -1008,4 +1008,237 @@ Verificação: por que o repository não faz commit() ? O que aconteceria com
 scalar_one_or_none() se, por um bug, dois usuários tivessem o mesmo e-mail?
 
 
+### Capítulo 13: services e exceções de domínio
 
+Arquivos: app/services/ e app/core/exceptions.py . O service é o coração do sistema:
+é onde moram as regras de negócio. Ele usa repositories para acessar dados e não sabe
+nada de HTTP.
+
+```text
+...
+├── src/                        # Diretório que contém o código-fonte
+│   └── fastapi_aisili/         # Pacote Python da aplicação
+│       ├──__init__.py
+│       └── services/ 
+│       │    └── exceptions.py
+│       └── services/ 
+│           ├── __init__.py  
+│           ├── auth.py
+│           ├── email.py
+│           ├── profile.py  
+│           └── user.py
+...
+```
+
+#### Exceções de domínio
+
+```python
+class AppError(Exception):
+    status_code: int = status.HTTP_400_BAD_REQUEST
+    code: str = "bad_request"
+    default_detail: str = "Requisição inválida."
+    def __init__(self, detail: str | None = None) -> None:
+        self.detail = detail or self.default_detail
+        super().__init__(self.detail)
+class NotFoundError(AppError):
+    status_code = status.HTTP_404_NOT_FOUND
+    code = "not_found"
+    default_detail = "Recurso não encontrado."
+```
+
+Criamos uma hierarquia de exceções. AppError é a mãe; NotFoundError ,
+ConflictError , AuthenticationError e PermissionDeniedError herdam dela e só
+mudam os atributos de classe. A expressão detail or self.default_detail usa a
+mensagem passada ou, se nenhuma for passada, a padrão.
+O service escreve raise ConflictError("E-mail já cadastrado.") e pronto. Ele não
+importa nada do FastAPI de resposta, não monta JSON e não escolhe status code diretamente.
+
+```python
+def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(AppError)
+    async def _handle_app_error(_: Request, exc: AppError) -> JSONResponse:
+    headers = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401
+else None
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "code": exc.code},
+        headers=headers,
+    )
+```
+
+Este é o tradutor. Quando qualquer AppError (ou filha) escapa de um endpoint, o FastAPI
+chama este handler, que converte a exceção em resposta HTTP. Uma única função atende
+todas as filhas, pois cada uma carrega seu próprio status_code . O campo code ( "conflict", "not_found" ) é estável e permite ao front-end tratar erros sem depender
+do texto.
+
+#### AuthService: cadastro
+
+```python
+class AuthService:
+    def __init__(self, session: AsyncSession, queue: TaskQueue) -> None:
+        self.session = session
+        self.queue = queue
+        self.users = UserRepository(session)
+        self.profiles = ProfileRepository(session)
+        self.reset_tokens = PasswordResetRepository(session)
+    async def register(self, data: UserCreate) -> User:
+        if await self.users.get_by_email(data.email):
+            raise ConflictError("E-mail já cadastrado.")
+        default_profile = await self.profiles.get_by_name(DEFAULT_PROFILE)
+        user = User(
+            email=data.email,
+            full_name=data.full_name,
+            hashed_password=hash_password(data.password),
+            profiles=[default_profile] if default_profile else [],
+        )
+        self.users.add(user)
+        await self.session.commit()
+        await self.queue.enqueue(TaskName.SEND_WELCOME_EMAIL,
+        email=user.email, full_name=user.full_name)
+        return user
+
+```
+
+O construtor recebe a sessão e a fila, e cria os três repositories com a mesma sessão. O
+método register conta uma história legível: verifica duplicidade, busca o perfil padrão,
+cria o usuário com a senha já em hash, salva, e só então enfileira o e-mail.
+A ordem importa: o e-mail é enfileirado depois do commit. Se fosse antes e o commit
+falhasse, a pessoa receberia "bem-vindo" de uma conta que não existe. Note também
+profiles=[...] definido explicitamente na criação, o que evita aquele carregamento
+implícito proibido no modo async.
+
+#### AuthService: login
+
+```python
+async def authenticate(self, email: str, password: str) -> TokenPair:
+    user = await self.users.get_by_email(email)
+    if user is None:
+        verify_password(password, DUMMY_PASSWORD_HASH)
+        # tempo constante
+        raise AuthenticationError("E-mail ou senha incorretos.")
+    if not verify_password(password, user.hashed_password):
+        raise AuthenticationError("E-mail ou senha incorretos.")
+    if not user.is_active:
+        raise AuthenticationError("Usuário inativo.")
+    return self._issue_tokens(user)
+```
+
+A mensagem é a mesma para e-mail inexistente e senha errada, e o tempo também (pelo
+hash falso. Assim o atacante não descobre quais e-mails existem. A checagem de is_active vem depois da senha, para que só quem sabe a senha descubra que a conta está inativa.
+_issue_tokens é um @staticmethod : um método que não usa self , ligado à classe só
+por organização. O underline indica uso interno.
+
+#### AuthService: validação do token
+
+```python
+async def get_user_from_token(self, token: str, expected_type: TokenType) -> User:
+    try:
+        payload = decode_token(token)
+        user_id = uuid.UUID(payload["sub"])
+    except (jwt.PyJWTError, ValueError, KeyError) as exc:
+        raise AuthenticationError from exc
+    if payload.get("type") != expected_type:
+        raise AuthenticationError("Tipo de token inválido.")
+    user = await self.users.get(user_id)
+    if user is None or not user.is_active:
+        raise AuthenticationError
+    if payload.get("ver") != user.token_version:
+        raise AuthenticationError("Token revogado.")
+    return user
+```
+
+Este é o porteiro do sistema. Ele verifica, em ordem: assinatura e validade, tipo do token,
+existência e atividade do usuário, e versão. Qualquer falha vira um 401 genérico.
+O raise ... from exc encadeia as exceções: a resposta HTTP não mostra detalhes, mas
+o log guarda a causa original para depuração. Repare que raise AuthenticationError
+sem parênteses também funciona: o Python instancia a classe sozinho.
+
+#### AuthService: recuperação de senha
+
+```python
+async def forgot_password(self, email: str) -> None:
+    user = await self.users.get_by_email(email)
+    if user is None or not user.is_active:
+        return
+    await self.reset_tokens.invalidate_all_for_user(user.id)
+    raw_token, token_hash = generate_reset_token()
+    self.reset_tokens.add(PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=utcnow() +
+        timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES),
+        ))
+    await self.session.commit()
+    reset_url = f"{settings.FRONTEND_URL}/reset-password? {urlencode({'token': raw_token})}"
+    await self.queue.enqueue(TaskName.SEND_PASSWORD_RESET_EMAIL,
+    email=user.email, reset_url=reset_url)
+```
+
+Se o e-mail não existe, a função simplesmente retorna, e o endpoint responde a mesma
+mensagem genérica. Quando existe: invalida tokens anteriores, gera um par (bruto, hash),
+salva o hash e manda o bruto por e-mail. A linha raw_token, token_hash =
+generate_reset_token() é desempacotamento de tupla. O urlencode escapa o token
+para uso seguro numa URL.
+
+```python
+async def reset_password(self, raw_token: str, new_password: str) -> None:
+    reset = await self.reset_tokens.get_valid_by_hash(hash_token(raw_token))
+    if reset is None:
+        raise AppError("Token inválido ou expirado.")
+    user = await self.users.get(reset.user_id)
+    ...
+    await self.reset_tokens.invalidate_all_for_user(user.id)
+    self._set_password(user, new_password)
+    await self.session.commit()
+
+@staticmethod
+def _set_password(user: User, new_password: str) -> None:
+    user.hashed_password = hash_password(new_password)
+    user.token_version += 1
+```
+
+O token recebido é transformado em hash e procurado no banco. Encontrado e válido:
+marca como usado, troca a senha e incrementa token_version . Tudo num commit só.
+_set_password é reaproveitado por change_password , então qualquer troca de senha
+revoga as sessões antigas.
+
+#### UserService e ProfileService
+
+```python
+async def update_me(self, user: User, data: UserUpdateMe) -> User:
+    changes = data.model_dump(exclude_unset=True, exclude_none=True)
+    new_email = changes.get("email", user.email)
+    if new_email != user.email and await self.users.get_by_email(new_email):
+        raise ConflictError("E-mail já cadastrado.")
+    for field, value in changes.items():
+        setattr(user, field, value)
+    await self.session.commit()
+    return user
+```
+
+changes.get("email", user.email) devolve o novo e-mail se foi enviado, senão o atual.
+Só consultamos o banco se o e-mail realmente mudou. O setattr(user, field, value)
+é o mesmo que user.full_name = value , mas com o nome do campo numa variável,
+aplicando qualquer campo do dicionário sem if para cada um.
+
+```python
+async def add_profile(self, user_id: uuid.UUID, profile_id: uuid.UUID) -> User:
+    user = await self.get(user_id)
+    profile = await self.profiles.get(profile_id)
+    if profile is None:
+        raise NotFoundError("Perfil não encontrado.")
+    if profile not in user.profiles:
+        user.profiles.append(profile)
+        await self.session.commit()
+    return user
+```
+
+Aqui o N:N do capítulo 4 aparece na prática. A verificação if profile not in
+user.profiles torna a operação idempotente: vincular duas vezes o mesmo perfil não dá
+erro, apenas não muda nada. O método get do service (diferente do get do repository)
+já lança NotFoundError , então quem chama não precisa checar None .
+O ProfileService segue o mesmo padrão: create checa nome duplicado, update
+checa duplicidade só se o nome mudou, delete remove e os vínculos somem pelo
+CASCADE .
+Verificação: por que o e-mail de boas-vindas é enfileirado depois do commit() e não
+antes? Por que o login dá a mesma mensagem para "e-mail não existe" e "senha errada"?
