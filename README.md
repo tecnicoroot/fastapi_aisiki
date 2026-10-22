@@ -1019,8 +1019,8 @@ nada de HTTP.
 ├── src/                        # Diretório que contém o código-fonte
 │   └── fastapi_aisili/         # Pacote Python da aplicação
 │       ├──__init__.py
-│       └── services/ 
-│       │    └── exceptions.py
+│       └── core/ 
+│       │   └── exceptions.py
 │       └── services/ 
 │           ├── __init__.py  
 │           ├── auth.py
@@ -1242,3 +1242,333 @@ checa duplicidade só se o nome mudou, delete remove e os vínculos somem pelo
 CASCADE .
 Verificação: por que o e-mail de boas-vindas é enfileirado depois do commit() e não
 antes? Por que o login dá a mesma mensagem para "e-mail não existe" e "senha errada"?
+
+### Capítulo 14: filas com Redis e ARQ
+
+Arquivos: app/core/queue.py , app/worker/tasks.py , app/worker/settings.py e app/services/email.py . Aqui está a parte "sistema assíncrono com filas" do projeto.
+
+```text
+...
+├── src/                        # Diretório que contém o código-fonte
+│   └── fastapi_aisili/         # Pacote Python da aplicação
+│       ├──__init__.py
+│       └── core/ 
+│       │    └── queue.py
+│       └── services/ 
+│       │   ├── __init__.py  
+│       │   └── email.py
+│       │   
+│       └── work/
+│          ├── settings.py  
+│          └── task.py
+...
+```
+
+Por que uma fila?
+Enviar um e-mail pode levar de 1 a 5 segundos, e o servidor SMTP pode estar fora do ar. Se
+o endpoint de cadastro enviasse o e-mail diretamente, o usuário esperaria esse tempo
+todo, e uma falha no SMTP faria o cadastro inteiro dar erro.
+Com a fila, o endpoint só anota "enviar e-mail para fulano" no Redis (uma operação de 1
+ms) e responde. Um processo separado, o worker, fica escutando a fila e executa as
+tarefas. Se o SMTP falhar, o worker tenta de novo mais tarde, e o usuário nem percebe.
+
+|Peça|Papel|Analogia|
+|--|--|--|
+|API (produtor)|Coloca tarefas na fila|Garçom que anota o pedido|
+|Redis|Guarda a fila|Quadro de pedidos da cozinha|
+|Worker (consumidor)|Executa as tarefas|Cozinheiro|
+|ARQ|Biblioteca que organiza tudo isso|As regras da cozinha|
+
+O ARQ foi escolhido por ser nativamente async , combinando com o resto do projeto.
+Alternativas conhecidas são Celery (síncrono, mais pesado) e RQ.
+
+#### Um protocolo para a fila
+
+```python
+class TaskQueue(Protocol):
+    async def enqueue(self, function: str, **kwargs: Any) -> None: ...
+
+class ArqTaskQueue:
+    def __init__(self, pool: ArqRedis) -> None:
+        self._pool = pool
+    async def enqueue(self, function: str, **kwargs: Any) -> None:
+        await self._pool.enqueue_job(function, **kwargs)
+```
+
+Um Protocol define um contrato: "qualquer objeto que tenha um método enqueue com
+essa assinatura serve". Diferente de herança, a classe não precisa declarar que
+implementa o protocolo; basta ter o método. Isso é chamado de duck typing estrutural: "se
+anda como pato e grasna como pato, é pato".
+O service depende de TaskQueue , não do ARQ. Em produção, recebe um ArqTaskQueue .
+Nos testes, recebe uma FakeQueue que só guarda os jobs numa lista. Se um dia você
+trocar ARQ por Celery, só escreve um novo adaptador; nenhum service muda.
+**kwargs captura argumentos nomeados num dicionário: enqueue("tarefa",
+email="a@b.com") vira kwargs = {"email": "a@b.com"} , e é repassado ao ARQ com
+**kwargs de novo.
+
+#### Nomes de tarefa como constantes
+
+```python
+class TaskName:
+    SEND_WELCOME_EMAIL = "send_welcome_email"
+    SEND_PASSWORD_RESET_EMAIL = "send_password_reset_email"
+```
+
+A API e o worker são processos diferentes; eles se comunicam pelo nome da função, como
+texto. Se o service escrevesse "send_welcom_email" (com erro), o job ficaria parado na
+fila sem ninguém para executá-lo. Com constantes, um erro de digitação vira erro de
+atributo, detectado pelo mypy na hora.
+
+
+#### As tarefas
+
+```python
+async def send_password_reset_email(ctx: dict[str, Any], email: str, reset_url: str) -> None:
+    try:
+        await send_email(
+            to=email,
+            subject="Recuperação de senha",
+            text=f"Acesse: {reset_url}\n\nO link expira em {minutes}
+            minutos.",
+            html=f'<p><a href="{reset_url}">Clique aqui para redefinir</a>
+            </p>',
+        )
+    except aiosmtplib.SMTPException as exc:
+        raise Retry(defer=ctx["job_try"] * 10) from exc
+```
+
+oda tarefa do ARQ recebe primeiro o ctx , um dicionário com informações do job; os
+demais argumentos são os passados no enqueue . O ctx["job_try"] diz qual é a
+tentativa atual (1, 2, 3...).
+O raise Retry(defer=...) é a política de nova tentativa com espera crescente: na 1ª
+falha espera 10 s, na 2ª 20 s, na 3ª 30 s. Isso dá tempo ao SMTP para se recuperar. Só
+capturamos SMTPException : um erro de programação (bug) não deve ser repetido
+indefinidamente.
+O e-mail tem versão em texto e em HTML: clientes de e-mail antigos ou configurados para
+texto puro mostram a primeira.
+
+#### O envio de e-mail
+
+```python
+async def send_email(*, to: str, subject: str, text: str, html: str | None = None) -> None:
+    message = EmailMessage()
+    message["From"] = settings.SMTP_FROM
+    message["To"] = to
+    message["Subject"] = subject
+    message.set_content(text)
+    if html:
+        message.add_alternative(html, subtype="html")
+    await aiosmtplib.send(message, hostname=settings.SMTP_HOST, port=settings.SMTP_PORT, ...)
+```
+
+EmailMessage é da biblioteca padrão do Python e monta o e-mail no formato correto.
+add_alternative cria um e-mail com duas versões do mesmo conteúdo. O
+aiosmtplib.send envia sem bloquear. Toda a configuração vem do .env : em
+desenvolvimento, aponta para o Mailpit; em produção, para um SMTP real como SES ou
+SendGrid.
+
+#### A configuração do worker
+
+```python
+class WorkerSettings:
+    functions: ClassVar = [send_welcome_email, send_password_reset_email]
+    redis_settings = get_redis_settings()
+    on_startup = startup
+    on_shutdown = shutdown
+    max_tries = 5
+    job_timeout = 60
+```
+
+O ARQ lê essa classe para saber como trabalhar. functions é a lista de tarefas que este
+worker sabe executar; o nome de cada função é o nome usado no enqueue . max_tries =
+5 limita as tentativas; job_timeout = 60 mata uma tarefa travada após 60 s.
+on_startup e on_shutdown rodam ao iniciar e encerrar o worker. Para rodar:
+
+```python
+arq app.worker.settings.WorkerSettings
+```
+
+Para adicionar uma nova tarefa, por exemplo gerar um relatório, são três passos: escreva a
+função async def gerar_relatorio(ctx, ...) em tasks.py , adicione-a em
+functions , e crie a constante em TaskName.
+
+Verificação: se o servidor SMTP ficar fora do ar por 15 segundos, o que acontece com um
+cadastro feito nesse momento? E se ficar fora por uma hora?
+
+
+### Capítulo 15: a camada de api
+
+Arquivos: app/api/deps.py , app/api/v1/endpoints/ e app/api/v1/router.py . Esta é
+a porta de entrada HTTP. Graças ao trabalho das camadas anteriores, os endpoints ficam
+curtos: geralmente uma linha.
+
+```text
+...
+├── src/                        # Diretório que contém o código-fonte
+│   └── fastapi_aisili/         # Pacote Python da aplicação
+│       ├──__init__.py
+│       └── api/
+│       │   ├── __init__.py  
+│       │   ├── deps.py
+│       │   ├── email.py
+│       │   └── v1 /
+│       │       ├── __init__.py
+│       │       ├── router.py
+│       │       └── endpoints /
+│       │           ├── __init__.py
+│       │           ├── auth.py
+│       │           ├── healt.py
+│       │           ├── profiles.py
+│       │           └── users.py
+...
+```
+
+#### Injeção de dependências com Depends
+
+O Depends é o recurso mais poderoso do FastAPI. Você declara "esta função precisa de X" e o FastAPI providencia X antes de chamar a função. Se X também precisa de Y, ele resolve Y primeiro, formando uma árvore.
+
+```python
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
+TokenDep = Annotated[str, Depends(oauth2_scheme)]
+def get_queue(request: Request) -> TaskQueue:
+    queue: TaskQueue = request.app.state.queue
+    return queue
+QueueDep = Annotated[TaskQueue, Depends(get_queue)]
+Annotated[AsyncSession, Depends(get_session)] diz duas co
+```
+AsyncSession (para o mypy e o editor), e o valor vem de get_session (para o FastAPI).
+Guardar isso num alias como SessionDep evita repetir a expressão em cada endpoint.
+O get_queue lê a fila de app.state , onde o main.py a guardou ao iniciar. Ser uma dependência é o que permite aos testes trocá-la pela FakeQueue.
+
+#### Fábricas de services
+
+```python
+def get_auth_service(session: SessionDep, queue: QueueDep) -> AuthService:
+    return AuthService(session, queue)
+AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+```
+
+Para entregar um AuthService , o FastAPI precisa de uma sessão e de uma fila, e resolve as duas sozinho. Importante: dentro de uma mesma requisição, cada dependência é executada uma só vez e o resultado é reaproveitado. Então o AuthService e o
+get_current_user recebem a mesma sessão.
+
+#### O usuário atual
+
+```python
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"
+{settings.API_V1_PREFIX}/auth/login")
+async def get_current_user(token: TokenDep, auth: AuthServiceDep) -> User:
+    return await auth.get_user_from_token(token, expected_type="access")
+CurrentUser = Annotated[User, Depends(get_current_user)]
+```
+
+O OAuth2PasswordBearer lê o cabeçalho Authorization: Bearer <token> e devolve só o token. Se o cabeçalho não existir, ele mesmo responde 401. O tokenUrl informa ao Swagger onde fazer login, e é isso que faz funcionar o botão Authorize em /docs.
+A partir daí, qualquer endpoint que declare user: CurrentUser está protegido. Não existe "esquecer de checar o token": sem o parâmetro, a rota é pública; com ele, é autenticada.
+
+```python
+def require_profiles(*names: str) -> Callable[[User], Awaitable [User]]:
+    async def _checker(user: CurrentUser) -> User:
+    if user.is_superuser or user.has_any_profile(*names):
+        return user
+    raise PermissionDeniedError
+    return _checker
+
+AdminUser = Annotated[User, Depends(require_profiles("admin"))]
+```
+
+Este é o trecho mais sofisticado do projeto, então vale ir devagar. require_profiles é
+uma função que retorna outra função. Chamar require_profiles("admin") não verifica
+nada ainda: ela cria e devolve _checker , que "lembra" o valor de names . Esse mecanismo
+de lembrar variáveis do escopo externo chama-se closure.
+O FastAPI então usa _checker como dependência. Como _checker depende de
+CurrentUser , a cadeia completa a cada requisição é: ler o token, validar o JWT, carregar o
+usuário, verificar o perfil. Note a diferença de códigos: 401 significa "não sei quem você é";
+403 significa "sei quem você é, mas você não pode".
+Com isso, criar uma rota só para o financeiro é uma linha:
+
+```python
+@router.get("/relatorios")
+async def relatorios(user: Annotated[User,
+Depends(require_profiles("financeiro", "admin"))]) -> ...:
+```
+
+#### Os endpoints de autenticação
+
+```python
+router = APIRouter(prefix="/auth", tags=["auth"])
+@router.post("/register", response_model=UserRead,
+status_code=status.HTTP_201_CREATED)
+async def register(data: UserCreate, auth: AuthServiceDep) -> User:
+    return await auth.register(data)
+@router.post("/login")
+async def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], auth:
+AuthServiceDep) -> TokenPair:
+    return await auth.authenticate(form.username, form.password)
+
+```
+
+#### Decompondo o register
+
+* **APIRouter(prefix="/auth", tags=["auth"])** agrupa rotas: todas ganham o prefixo /auth e aparecem juntas no Swagger.
+* **@router.post("/register", ...)** registra a função para POST /auth/register.
+* **data: UserCreate** : como UserCreate é um schema Pydantic, o FastAPI sabe que deve ler o corpo JSON e validá-lo.
+* **response_model=UserRead** : o retorno é um User (model), mas a resposta é filtrada Ninhopelo UserRead . É aqui que o hashed_password é descartado.
+* **status_code=201** : o código HTTP correto para "recurso criado".
+
+O login é diferente: usa OAuth2PasswordRequestForm , que lê um formulário (não JSON) com os campos username e password . Isso segue o padrão OAuth2, exigido pelo Swagger. O campo se chama username pelo padrão, mas nós passamos o e-mail. O Depends() vazio diz ao FastAPI para montar a própria classe a partir da requisição.
+
+```python
+@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(data: ForgotPasswordRequest, auth: AuthServiceDep) -> Message:
+    await auth.forgot_password(data.email)
+    return Message(message="Se o e-mail estiver cadastrado, você receberá as instruções.")
+
+```
+
+O 202 Accepted é o código para "recebi o pedido e vou processar depois", exatamente o
+que acontece com a fila. A mensagem é a mesma exista o e-mail ou não.
+
+#### Os endpoints de usuários
+
+```python
+@router.get("/me", response_model=UserRead)
+async def read_me(user: CurrentUser) -> User:
+    return user
+@router.get("", response_model=Page[UserRead])
+async def list_users(_: AdminUser, service: UserServiceDep, params: PageQuery) -> Page[UserRead]:
+    items, total = await service.list(offset=params.offset, limit=params.size)
+    return Page[UserRead](
+items=[UserRead.model_validate(u) for u in items],
+total=total, page=params.page, size=params.size,
+)
+@router.post("/{user_id}/profiles/{profile_id}", response_model=UserRead)
+async def add_profile(user_id: uuid.UUID, profile_id: uuid.UUID, _: AdminUser, service: UserServiceDep) -> User:
+    return await service.add_profile(user_id, profile_id)
+```
+
+#### Observe estes padrões
+
+* **read_me** é a função mais curta possível: toda a lógica de autenticação já rodou nas
+dependências.
+* **_: AdminUser** : o underline como nome indica "preciso desta dependência pela verificação, mas não vou usar o valor". A simples presença do parâmetro protege a rota.
+* **params: PageQuery** lê ?page=2&size=20 da URL, validado pelo PageParams .
+* **UserRead.model_validate(u)** converte cada model em schema manualmente, porque aqui montamos o Page nós mesmos.
+user_id: uuid.UUID no caminho: o FastAPI valida que é um UUID.
+/users/abc/profiles/... devolve 422 sem chegar ao service.
+* **A ordem das rotas importa**: /me é declarada antes de /{user_id} . Se fosse depois, o
+FastAPI tentaria interpretar "me" como um UUID.
+
+#### Montando os routers
+
+```python
+api_router = APIRouter()
+api_router.include_router(health.router)
+api_router.include_router(auth.router)
+api_router.include_router(users.router)
+api_router.include_router(profiles.router)
+```
+O router.py junta todos os routers da versão 1. No main.py , ele recebe o prefixo
+/api/v1 . Quando surgir uma mudança incompatível na API, você cria a pasta v2/ e os
+clientes antigos continuam funcionando em /api/v1 .
+Verificação: qual a diferença entre receber 401 e 403? O que aconteceria se você
+removesse o parâmetro _: AdminUser de list_users?
+
