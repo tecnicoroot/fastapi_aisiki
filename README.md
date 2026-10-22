@@ -1,8 +1,13 @@
 ## Guia passo a passo
 
+### Índice
+
+- [Capítulo 1](#capitulo-1)
+- [Capítulo 10](#capitulo-10)
+
 ### Capítulo 1: Criando projeto com o **uv**
 
-acessando o local utilizado para guardar seu projeto execute o comando para a inicialização do projeto
+Acessando o local utilizado para guardar seu projeto execute o comando para a inicialização do projeto
 
 ```bash
 uv init fastapi-aisiki
@@ -128,19 +133,19 @@ show_missing = true
 skip_covered = true
 ```
 
-### Capítulo 3: Antes de começar a codificatr...
+### Capítulo 3: Antes de começar a codificatr
 
 Antes de iniciar a codificação vamos entender um pouco melhor as camadas e o fluxo de nossa aplicação.
 
-|Camada |Pasta |Responsabilidade |Não deve saber de...|
+|Camada|Pasta|Responsabilidade|Não deve saber de...|
 |--|--|--|--|
 |API(endpoints)|app/api/ Receber HTTP, validar entrada,|devolver resposta|SQL, regras de negócio|
-|Schemas |app/schemas/ |Formato dos dados que entram esaem (contratos)|Banco de dados|
-|Services |app/services/ |Regras de negócio ("e-mail nãopode repetir")|HTTP, status code|
-|Repositories |app/repositories/ |Consultas ao banco (SELECT, INSERT...)|Regras de negócio|
-|Models |app/models/ |Tabelas do banco como classes Python|Tudo acima|
-|Core |app/core/ |Configuração, segurança,exceções, fila |—|
-|Worker |app/worker/ |Tarefas executadas em segundo plano |HTTP|
+|Schemas|app/schemas/|Formato dos dados que entram esaem (contratos)|Banco de dados|
+|Services|app/services/|Regras de negócio ("e-mail nãopode repetir")|HTTP, status code|
+|Repositories|app/repositories/|Consultas ao banco (SELECT, INSERT...)|Regras de negócio|
+|Models|app/models/|Tabelas do banco como classes Python|Tudo acima|
+|Core|app/core/|Configuração, segurança,exceções, fila|—|
+|Worker|app/worker/|Tarefas executadas em segundo plano|HTTP|
 
 ```mermaid
 flowchart LR
@@ -196,7 +201,6 @@ sequenceDiagram
 
 ```
 
-
 > Por que isso importa? Imagine que amanhã você precise criar usuários também por um comando de terminal. Como a regra "e-mail não pode repetir" está no service, e não no endpoint, você reaproveita o AuthService sem duplicar nada.
 
 #### O caminho de uma requisição
@@ -215,7 +219,7 @@ de boas-vindas" na fila do Redis.
 escondendo a senha.
 > 7. Em paralelo, o worker pega a tarefa da fila e envia o e-mail, sem atrasar a resposta. Camada Pasta Responsabilidade Não deve saber de...
 
-### Capítulo 5: Bibliotecas que utilizaremos
+### Capítulo 4: Bibliotecas que utilizaremos
 
 Pode ser necessário instalar a versão correta do python:
 
@@ -225,36 +229,36 @@ uv python pin 3.12
 uv sync
 ```
 
-|Biblioteca |Para que serve|
+|Biblioteca|Para que serve|
 |--|--|
-|fastapi |Framework web: rotas, validação, documentação automática|
-|uvicorn[standard] |ServidorASGI que executa a aplicação|
-|pydantic[email] / pydantic-settings |Validação de dados e leitura do .env |
-|sqlalchemy[asyncio] + asyncpg | ORM e driver assíncrono do PostgreSQL
-|alembic |Migrations (versionamento do banco)|
-|pyjwt |Criar e validar tokens JWT|
-|pwdlib[argon2]| Hash seguro de senhas com Argon2|
-|python-multipart |Permite receber formulários (usado no loginOAuth2)|
-|arq |Fila de tarefas assíncrona sobre Redis|
-|aiosmtplib |Envio de e-mail assíncrono|
+|fastapi|Framework web: rotas, validação, documentação automática|
+|uvicorn[standard]|ServidorASGI que executa a aplicação|
+|pydantic[email] / pydantic-settings|Validação de dados e leitura do .env|
+|sqlalchemy[asyncio] + asyncpg|ORM e driver assíncrono do PostgreSQL
+|alembic|Migrations (versionamento do banco)|
+|pyjwt|Criar e validar tokens JWT|
+|pwdlib[argon2]|Hash seguro de senhas com Argon2|
+|python-multipart|Permite receber formulários (usado no loginOAuth2)|
+|arq|Fila de tarefas assíncrona sobre Redis|
+|aiosmtplib|Envio de e-mail assíncrono|
 
-### Capítulo 6: Git Cada prefixo tem um papel: Mensagens no commit
+### Capítulo 5: Git Cada prefixo tem um papel: Mensagens no commit
 
 Tipos de commit mais utilizados
 O Conventional Commits define uma convenção para classificar as alterações.
 
-|Tipo |Quando utilizar| Exemplo|
+|Tipo|Quando utilizar|Exemplo|
 |--|--|--|
-|feat |Adicionar uma funcionalidade	|feat(api): adiciona rota de usuários|
-|fix |Corrigir um defeito |fix(api): corrige validação de email|
-|docs |Alterar documentação	|docs(readme): documenta instalação do projeto|
-|style |Alterações de formatação que não mudam a lógica	|style(api): ajusta formatação do código|
-|refactor |Reorganizar o código sem alterar seu comportamento externo |refactor(services): simplifica validação de usuários|
-|test |Adicionar ou modificar testes |test(api): adiciona testes para rota de usuários|
-|build |Alterar dependências ou o sistema de build |build(deps): adiciona dependência do fastapi|
-|ci	|Alterar configurações de integração contínua |ci(github): configura execução dos testes|
-|perf |Melhorar o desempenho |perf(api): reduz consultas ao banco de dados|
-|chore |Outras tarefas de manutenção |chore(git): atualiza arquivos ignorados|
+|feat|Adicionar uma funcionalidade |feat(api): adiciona rota de usuários|
+|fix|Corrigir um defeito|fix(api): corrige validação de email|
+|docs|Alterar documentação |docs(readme): documenta instalação do projeto|
+|style|Alterações de formatação que não mudam a lógica |style(api): ajusta formatação do código|
+|refactor|Reorganizar o código sem alterar seu comportamento externo|refactor(services): simplifica validação de usuários|
+|test|Adicionar ou modificar testes|test(api): adiciona testes para rota de usuários|
+|build|Alterar dependências ou o sistema de build|build(deps): adiciona dependência do fastapi|
+|ci |Alterar configurações de integração contínua|ci(github): configura execução dos testes|
+|perf|Melhorar o desempenho|perf(api): reduz consultas ao banco de dados|
+|chore|Outras tarefas de manutenção|chore(git): atualiza arquivos ignorados|
 
 Agora neste ponto vou fazer o primeiro commit
 
@@ -266,7 +270,7 @@ chore(project): configura estrutura inicial do projeto
 - README.md
 ```
 
-### Capítulo 7: configuração com pydantic-settings e o .env
+### Capítulo 6: configuração com pydantic-settings e o .env
 
 Arquivo: app/core/config.py . A regra de ouro é: nada que muda entre ambientes fica
 no código. Senha do banco, chave do JWT, endereço do Redis vêm de variáveis de
@@ -287,18 +291,18 @@ procura cada atributo como variável de ambiente com o **mesmo nome**. A ordem d
 é: variável de ambiente real primeiro, depois o arquivo .env , depois o valor padrão
 escrito na classe.
 
-#### Repare nos detalhes:
+#### Repare nos detalhes
 
-* **Tipos convertem e validam**. POSTGRES_PORT: int faz o texto "5432" do .env virar o número 5432. Se alguém escrever POSTGRES_PORT=abc , a aplicação nem sobe, com uma mensagem clara.
-* **Literal[...]** só aceita aqueles valores exatos. Um erro de digitação como ENVIRONMENT=producton é barrado na hora.
-* **SECRET_KEY** não tem valor padrão. Por isso ela é obrigatória: se faltar, a aplicação
+- **Tipos convertem e validam**. POSTGRES_PORT: int faz o texto "5432" do .env virar o número 5432. Se alguém escrever POSTGRES_PORT=abc , a aplicação nem sobe, com uma mensagem clara.
+- **Literal[...]** só aceita aqueles valores exatos. Um erro de digitação como ENVIRONMENT=producton é barrado na hora.
+- **SECRET_KEY** não tem valor padrão. Por isso ela é obrigatória: se faltar, a aplicação
 recusa iniciar. Isso evita subir em produção com uma chave de exemplo.
-* **SecretStr** esconde o valor quando impresso. print(settings.SECRET_KEY) mostra
+- **SecretStr** esconde o valor quando impresso. print(settings.SECRET_KEY) mostra
 ********** , e logs não vazam senhas por acidente. Para usar o valor real, chama-se
 .get_secret_value() .
-* **extra="ignore"** permite que o .env tenha variáveis que a classe não usa (como
+- **extra="ignore"** permite que o .env tenha variáveis que a classe não usa (como
 INSTALL_DEV , usada pelo Docker).
-* **CORS_ORIGINS: list[str]** é lida como JSON: no .env escreve-se CORS_ORIGINS=
+- **CORS_ORIGINS: list[str]** é lida como JSON: no .env escreve-se CORS_ORIGINS=
 ["http://localhost:3000"] .
 
 #### Validação entre campos
@@ -350,7 +354,6 @@ settings = get_settings()
 Ler o .env e validar tudo tem custo, e não faz sentido repetir. O **@lru_cache** memoriza o retorno: a primeira chamada cria o objeto, as seguintes devolvem o mesmo. O resto do projeto importa settings diretamente.
 Um detalhe importante para os testes: como settings é criado no momento do import,o conftest.py precisa alterar os.environ antes de importar qualquer coisa de app.
 
-
 O .env.example
 
 O .env real fica fora do Git (está no .gitignore ), porque contém segredos. O
@@ -358,7 +361,7 @@ O .env real fica fora do Git (está no .gitignore ), porque contém segredos. O
 Verificação: se o .env tem POSTGRES_HOST=localhost e o docker-compose.yml define
 POSTGRES_HOST: db , qual valor a aplicação usa dentro do container? Por quê?
 
-### Capitulo 8: Banco de Dados assincrono
+### Capitulo 7: Banco de Dados assincrono
 
 ```text
 ...
@@ -413,10 +416,10 @@ User(UUIDPrimaryKeyMixin, TimestampMixin, Base) .
 
 Entendendo a sintaxe do SQLAlchemy 2.0:
 
-* Mapped[uuid.UUID] diz o tipo Python do atributo. O SQLAlchemy deduz o tipo da
+- Mapped[uuid.UUID] diz o tipo Python do atributo. O SQLAlchemy deduz o tipo da
 coluna a partir dele (UUID vira UUID no Postgres). Se o tipo for str | None , a colunaaceita NULL ; sem None , ela é NOT NULL .
-* mapped_column(...) recebe os detalhes da coluna: chave primária, padrão, índice.
-* UUID em vez de inteiro sequencial: IDs como 1, 2, 3 revelam quantos usuários
+- mapped_column(...) recebe os detalhes da coluna: chave primária, padrão, índice.
+- UUID em vez de inteiro sequencial: IDs como 1, 2, 3 revelam quantos usuários
 existem e permitem adivinhar o próximo. UUIDs são imprevisíveis.
 Por que default=utcnow e server_default=func.now() ? O server_default vai para a
 tabela no banco, valendo até para inserts feitos fora da aplicação. O default em Python preenche o valor no objeto antes de salvar. Isso é crucial no modo assíncrono: se só o banco gerasse a data, o SQLAlchemy precisaria fazer uma nova consulta "escondida" para ler o valor, e consultas implícitas são proibidas em código async (gerariam o erroMissingGreenlet ).
@@ -441,12 +444,12 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 São três peças diferentes, e vale entender a diferença:
 
-* Engine é o gerenciador do pool de conexões. Abrir conexão com o Postgres é caro,
+- Engine é o gerenciador do pool de conexões. Abrir conexão com o Postgres é caro,
 então o engine mantém até 10 abertas ( pool_size ) e cria até 20 extras em picos
 ( max_overflow ). Existe uma só engine para a aplicação inteira. O pool_pre_ping
 testa a conexão antes de usar, evitando erro quando o banco reiniciou.
-* SessionLocal é uma fábrica de sessões já configurada.
-* Session é a "unidade de trabalho": você adiciona, altera e remove objetos, e no
+- SessionLocal é uma fábrica de sessões já configurada.
+- Session é a "unidade de trabalho": você adiciona, altera e remove objetos, e no
 commit() tudo vai para o banco numa transação. Cada requisição HTTP recebe a sua
 própria sessão.
 
@@ -460,9 +463,7 @@ Verificação: por que existe uma engine para toda a aplicação, mas uma sessã
 requisição? O que aconteceria se duas requisições simultâneas compartilhassem a
 mesma sessão?
 
-
-
-### Capítulo 9: Os models e o relacionamento N:N
+### Capítulo 8: Os models e o relacionamento N:N
 
 ```text
 ...
@@ -482,10 +483,10 @@ Num banco relacional, uma célula guarda um valor só. Não dá para guardar "ad
 financeiro" numa coluna profiles de users sem perder integridade. A solução é uma
 tabela de associação, onde cada linha diz "o usuário X tem o perfil Y":
 
-| user_id |profile_id|
+|user_id|profile_id|
 |--|--|
-|Maria| user|
-|Maria| fianaceiro|
+|Maria|user|
+|Maria|fianaceiro|
 |João|user|
 |João|admin|
 
@@ -504,27 +505,27 @@ user_profiles = Table(
 
 Note que não é uma classe, e sim um objeto Table . Como ela só liga duas tabelas e não tem dados próprios, não precisa de model. Os pontos importantes:
 
-* **Chave primária composta** ( user_id + profile_id ): o banco impede que o mesmo
+- **Chave primária composta** ( user_id + profile_id ): o banco impede que o mesmo
 perfil seja vinculado duas vezes ao mesmo usuário.
-* **ForeignKey** garante que só existam IDs válidos. Não é possível vincular um perfil que não existe.
-* **ondelete="CASCADE"**: se um perfil for excluído, as linhas de vínculo somem junto, automaticamente, no próprio banco.
+- **ForeignKey** garante que só existam IDs válidos. Não é possível vincular um perfil que não existe.
+- **ondelete="CASCADE"**: se um perfil for excluído, as linhas de vínculo somem junto, automaticamente, no próprio banco.
 
 #### O model Profile
 
-__tablename__ define o nome da tabela. unique=True impede dois perfis com o mesmo
+**tablename** define o nome da tabela. unique=True impede dois perfis com o mesmo
 nome; index=True acelera buscas por nome. Como description é str | None , a
-coluna aceita valor vazio. O __repr__ só define como o objeto aparece ao ser impresso, útil para depurar.
+coluna aceita valor vazio. O **repr** só define como o objeto aparece ao ser impresso, útil para depurar.
 
 #### O model User
 
 Campo a campo:
 
-* email com 320 caracteres: é o tamanho máximo que a especificação de e-mail
+- email com 320 caracteres: é o tamanho máximo que a especificação de e-mail
 permite.
-* hashed_password : nunca guardamos a senha, só o hash. O nome do campo deixa isso explícito para quem lê.
-* is_active : permite desativar um usuário sem apagá-lo, preservando histórico.
-* is_superuser : um "passe livre" que ignora checagem de perfis.
-* token_version : um contador. Cada token JWT carrega o valor atual; ao trocar a senha, o contador sobe e todos os tokens antigos deixam de valer.
+- hashed_password : nunca guardamos a senha, só o hash. O nome do campo deixa isso explícito para quem lê.
+- is_active : permite desativar um usuário sem apagá-lo, preservando histórico.
+- is_superuser : um "passe livre" que ignora checagem de perfis.
+- token_version : um contador. Cada token JWT carrega o valor atual; ao trocar a senha, o contador sobe e todos os tokens antigos deixam de valer.
 
 #### O relationship: a parte mais importante
 
@@ -539,9 +540,9 @@ await session.commit()
 
 Os parâmetros:
 
-* **secondary=user_profiles** diz qual tabela de associação usar.
-* **lazy="selectin"** define quando os perfis são carregados. O padrão ( lazy="select" ) carrega só ao acessar user.profiles , mas em código async esse carregamento tardio é proibido e gera erro. Com selectin , ao buscar usuários o SQLAlchemy faz logo em seguida um segundo SELECT ... WHERE user_id IN (...) trazendo os perfis de todos de uma vez. São duas consultas no total, mesmo para 100 usuários, evitando o famoso problema N+1.
-* **order_by=Profile.name** devolve os perfis sempre em ordem alfabética, o que torna respostas e testes previsíveis.
+- **secondary=user_profiles** diz qual tabela de associação usar.
+- **lazy="selectin"** define quando os perfis são carregados. O padrão ( lazy="select" ) carrega só ao acessar user.profiles , mas em código async esse carregamento tardio é proibido e gera erro. Com selectin , ao buscar usuários o SQLAlchemy faz logo em seguida um segundo SELECT ... WHERE user_id IN (...) trazendo os perfis de todos de uma vez. São duas consultas no total, mesmo para 100 usuários, evitando o famoso problema N+1.
+- **order_by=Profile.name** devolve os perfis sempre em ordem alfabética, o que torna respostas e testes previsíveis.
 O método has_any_profile("admin", "gerente") usa *names para aceitar qualquer
 quantidade de argumentos. A expressão any(...) retorna True assim que encontra o
 primeiro perfil que bate. Colocar esse método no model mantém a lógica perto dos dados.
@@ -550,13 +551,15 @@ primeiro perfil que bate. Colocar esse método no model mantém a lógica perto 
 
 Cada pedido de "esqueci minha senha" cria uma linha aqui. expires_at limita a validade; used_at marca quando foi usado, garantindo uso único. Guardamos token_hash (64 caracteres de um SHA-256) e não o token: se o banco vazar, os hashes não servem para redefinir senha de ninguém.
 
-#### O arquivo __init__.py dos models
+#### O arquivo **init**.py dos models
 
-Esse arquivo parece inofensivo, mas é essencial. Uma tabela só entra no Base.metadata quando o módulo dela é importado. O Alembic faz from app import models , e esse __init__.py garante que todas as tabelas sejam registradas. Esquecer um import aqui faz o Alembic achar que a tabela não existe.
+Esse arquivo parece inofensivo, mas é essencial. Uma tabela só entra no Base.metadata quando o módulo dela é importado. O Alembic faz from app import models , e esse **init**.py garante que todas as tabelas sejam registradas. Esquecer um import aqui faz o Alembic achar que a tabela não existe.
 Verificação: o que acontece no banco quando você faz user.profiles.append(p) e
 depois commit() ? Por que lazy="selectin" e não o padrão?
 
-### Capítulo 10: Migrations com Alembic
+### Capítulo 9
+
+#### Migrations com Alembic
 
 Como já instalamos atraves do nosso pyproject, não será necessário utilizar o comando:
 
@@ -598,20 +601,20 @@ alembic_version qual foi a última migration aplicada, e alembic upgrade head ap
 as que faltam, em ordem. Todos os ambientes (seu computador, o do colega, produção)
 chegam ao mesmo schema.
 
-#### env.py assíncrono
+#### env .py assíncrono
 
 O env.py é o script que o Alembic executa em todo comando. Os pontos-chave:
 
-* **from app import models** registra todas as tabelas no metadata. O # noqa: F401 diz ao Ruff que o import "não usado" é proposital.
-* **target_metadata** é o que o Alembic compara com o banco real para descobrir
+- **from app import models** registra todas as tabelas no metadata. O # noqa: F401 diz ao Ruff que o import "não usado" é proposital.
+- **target_metadata** é o que o Alembic compara com o banco real para descobrir
 diferenças.
-* **settings.database_url** faz a migration usar a mesma configuração do .env , sem
+- **settings.database_url** faz a migration usar a mesma configuração do .env , sem
 duplicar a URL no alembic.ini .
-* **compare_type=True** faz o autogenerate detectar também mudanças de tipo, como
+- **compare_type=True** faz o autogenerate detectar também mudanças de tipo, como
 String(50) para String(100) .
-* **NullPool** desliga o pool: a migration abre uma conexão, executa e fecha, sem
+- **NullPool** desliga o pool: a migration abre uma conexão, executa e fecha, sem
 conexões sobrando.
-* **run_sync** é a ponte entre os dois mundos. O Alembic internamente é síncrono, então pegamos a conexão async e pedimos para rodar uma função síncrona dentro dela.
+- **run_sync** é a ponte entre os dois mundos. O Alembic internamente é síncrono, então pegamos a conexão async e pedimos para rodar uma função síncrona dentro dela.
 
 #### O fluxo de trabalho
 
@@ -622,8 +625,7 @@ make migration m="add phone to users" ).
 4. Aplique: alembic upgrade head.
 5. Para desfazer a última: alembic downgrade -1.
 
-
-#### Capítulo 11: schemas pydantic
+### Capítulo 10: schemas pydantic
 
 Arquivos em app/schemas/ . Schemas são os contratos da API: descrevem exatamente o
 que pode entrar e o que vai sair. Eles são diferentes dos models, e essa separação é uma das ideias mais importantes do projeto.
@@ -672,13 +674,11 @@ FullName = Annotated[str, Field(min_length=2, max_length=255)]
 Annotated[tipo, regras] cria um tipo com regras embutidas, que você declara uma vez
 e usa em vários lugares. Ler da esquerda para a direita:
 
-* **NormalizedEmail** : primeiro o EmailStr valida o formato; depois ( AfterValidator ) o
-valor é convertido para minúsculas. Assim Maria@Email.com e maria@email.com são o mesmo usuário.
-* **Password** : mínimo 8 caracteres. O máximo de 128 também importa: algoritmos de hash
+- **NormalizedEmail** : primeiro o EmailStr valida o formato; depois ( AfterValidator ) o
+valor é convertido para minúsculas. Assim <Maria@Email.com> e <maria@email.com> são o mesmo usuário.
+- **Password** : mínimo 8 caracteres. O máximo de 128 também importa: algoritmos de hash
 são lentos de propósito, e aceitar uma "senha" de 1 MB seria uma forma de derrubar o servidor.
 Se a regra falhar, o FastAPI devolve 422 com a lista de erros, sem que seu código seja executado.
-
-
 
 #### Schemas de entrada
 
@@ -691,11 +691,11 @@ class UserUpdateMe(BaseModel):
     full_name: FullName | None = None
     email: NormalizedEmail | None = None
 ```
+
 Em UserUpdateMe , tudo é opcional porque é uma atualização parcial (método PATCH): o
 cliente manda só o que quer mudar. No service usamos data.model_dump(exclude_unset=True) , que gera um dicionário apenas com os campos enviados. Assim, mandar só {"full_name": "Ana"} não apaga o e-mail.
 
 #### Schemas de saída e from_attributes
-
 
 ```python
 class UserRead(BaseModel):
@@ -724,7 +724,7 @@ pattern=r"^[a-z][a-z0-9_-]*$")]
 
 Nomes de perfil são usados no código ( require_profiles("financeiro") ), então
 precisam ser previsíveis. O pattern exige: começar com letra minúscula, seguida de
-letras, números, _ ou - . "Financeiro Geral" é rejeitado; "financeiro-geral" passa.
+letras, números,_ ou - . "Financeiro Geral" é rejeitado; "financeiro-geral" passa.
 
 #### Schema genérico de paginação
 
@@ -758,7 +758,17 @@ exclude_unset=True evita numa requisição PATCH?
 
 Arquivo: app/core/security.py . São funções pequenas e puras (não acessam banco), o que as torna fáceis de testar isoladamente.
 
-```python 
+```text
+...
+├── src/                        # Diretório que contém o código-fonte
+│   └── fastapi_aisili/         # Pacote Python da aplicação
+│       ├──__init__.py
+│       └── core/ 
+│           └── security.py
+...
+```
+
+```python
 _password_hash = PasswordHash.recommended() # Argon2id
 def hash_password(password: str) -> str:
     return _password_hash.hash(password)
@@ -788,7 +798,7 @@ mediria o tempo de resposta e descobriria quais e-mails estão cadastrados. Por 
 quando o usuário não existe, verificamos a senha contra esse hash "falso", gastando o
 mesmo tempo.
 
-#### Criando o JWT 
+#### Criando o JWT
 
 ```python
 def create_token(subject: str, token_type: TokenType, token_version: int) ->
@@ -878,3 +888,124 @@ banco não entregue tokens utilizáveis.
 Verificação: se alguém decodificar um access token no site jwt.io, o que ele consegue
 ver? E o que ele não consegue fazer? Por que trocar a senha desloga o usuário de todos os
 dispositivos?
+
+### Capítulo 12: repositories — isolando o SQL
+
+Arquivos em app/repositories/ . Um repository é uma classe que concentra as
+consultas de uma tabela. O service pede "me dê o usuário com este e-mail" e não precisa
+saber como isso vira SQL.
+
+```text
+...
+├── src/                        # Diretório que contém o código-fonte
+│   └── fastapi_aisili/         # Pacote Python da aplicação
+│       ├──__init__.py
+│       └── repository/ 
+│           ├── password_reset.py  
+│           ├── __init__.py  
+│           ├── profile.py  
+│           └── user.py
+...
+```
+
+#### O UserRepository linha a linha
+
+```python
+class UserRepository:
+    def __init__(self, session: AsyncSession) -> None:
+    @aself.session = session
+```
+
+O repository recebe a sessão pelo construtor, em vez de criá-la. Isso se chama injeção de
+dependência. Vantagem: vários repositories podem compartilhar a mesma sessão (e
+portanto a mesma transação), e nos testes podemos entregar uma sessão de teste.
+
+
+```python
+async def get(self, user_id: uuid.UUID) -> User | None:
+    return await self.session.get(User, user_id)
+```
+
+session.get busca pela chave primária. Ele tem um bônus: se o objeto já foi carregado
+nesta sessão, devolve da memória (o chamado identity map) sem ir ao banco. O retorno
+User | None obriga quem chama a tratar o caso "não encontrado", e o mypy fiscaliza isso.
+
+```python
+async def get_by_email(self, email: str) -> User | None:
+    result = await self.session.execute(select(User).where(User.email == email.lower()))
+    return result.scalar_one_or_none()
+```
+
+Aqui está a sintaxe moderna do SQLAlchemy 2.0, que lê quase como SQL:
+
+* **select(User)** equivale a SELECT * FROM users .
+* **.where(User.email == email.lower())** vira WHERE email = $1 . Note que é uma
+expressão Python, não uma string: o SQLAlchemy usa parâmetros, então não há risco de SQL injection.
+* **session.execute(...)** envia ao banco; o await espera a resposta.
+* scalar_one_or_none() pega o resultado: retorna o objeto se houver um, None se não
+houver, e lança erro se houver mais de um (o que indicaria um bug, já que o e-mail é único).
+
+#### Listagem com total
+
+```python
+async def list(self, *, offset: int, limit: int) -> tuple[Sequence[User], int]:
+    total = await self.session.scalar(select(func.count()).select_from(User)) or 0
+    result = await self.session.execute(
+        select(User).order_by(User.created_at.desc()).offset(offset).limit(limit)
+    )
+    return result.scalars().all(), total
+```
+
+São duas consultas: uma conta o total ( SELECT count(*) FROM users ), a outra traz só a
+página pedida. O cliente precisa do total para montar "página 2 de 8".
+O * na assinatura é um detalhe elegante: tudo depois dele só pode ser passado por
+nome. Você é obrigado a escrever list(offset=40, limit=20) ; list(40, 20) dá erro.
+Isso evita trocar os dois números por engano. O order_by é obrigatório em paginação:
+sem ele, o banco pode devolver os registros em ordem diferente a cada página.
+
+#### add e delete
+
+```python
+def add(self, user: User) -> None:
+    self.session.add(user)
+
+async def delete(self, user: User) -> None:
+    await self.session.delete(user)
+```
+
+#### O PasswordResetRepository
+
+```python
+async def get_valid_by_hash(self, token_hash: str) -> PasswordResetToken | None:
+    result = await self.session.execute(
+        select(PasswordResetToken).where(
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.used_at.is_(None),
+        PasswordResetToken.expires_at > utcnow(),
+    )
+)
+return result.scalar_one_or_none()
+```
+
+Várias condições no where são combinadas com AND . A consulta já filtra tudo de uma
+vez: hash certo, ainda não usado, ainda não expirado. Sobre used_at.is_(None) : em SQL,
+comparar com NULL exige IS NULL . O SQLAlchemy até traduz == None para isso, mas o
+Ruff acusa a comparação (regra E711), e .is_(None) deixa a intenção explícita.
+
+```python
+async def invalidate_all_for_user(self, user_id: uuid.UUID) -> None: 
+    await self.session.execute(
+        update(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user_id, PasswordResetToken.used_at.is_(None))
+        .values(used_at=utcnow())
+    )
+```
+
+Um UPDATE em massa: marca como usados todos os tokens pendentes do usuário, numa
+única instrução SQL, sem carregar nenhum objeto para a memória. Usamos isso ao gerar
+um novo token (só o último link vale) e ao redefinir a senha.
+Verificação: por que o repository não faz commit() ? O que aconteceria com
+scalar_one_or_none() se, por um bug, dois usuários tivessem o mesmo e-mail?
+
+
+
