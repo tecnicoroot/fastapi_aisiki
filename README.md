@@ -753,3 +753,128 @@ registros de uma vez. A propriedade offset converte "página 3 com 20 por págin
 
 Verificação: por que UserCreate não tem o campo is_superuser ? O que
 exclude_unset=True evita numa requisição PATCH?
+
+### Capítulo 11: Segurança - senhas, jwt e recuperação
+
+Arquivo: app/core/security.py . São funções pequenas e puras (não acessam banco), o que as torna fáceis de testar isoladamente.
+
+```python 
+_password_hash = PasswordHash.recommended() # Argon2id
+def hash_password(password: str) -> str:
+    return _password_hash.hash(password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return _password_hash.verify(plain_password, hashed_password)
+
+```
+
+Um hash é uma transformação de mão única: de "minha-senha" sai algo como $argon2id$v=19$m=65536... , e não existe caminho de volta. Para conferir o login, aplicamos o hash na senha digitada e comparamos.
+
+Por que Argon2id e não MD5 ou SHA-256? Hashes comuns são rápidos demais: uma placa
+de vídeo testa bilhões de senhas por segundo. O Argon2 é lento e consome memória de
+propósito, o que torna ataques de força bruta inviáveis. Ele também adiciona um salt
+aleatório, então duas pessoas com a senha 123456 têm hashes diferentes.
+O underline em _password_hash é uma convenção Python para "uso interno deste
+módulo". O resto do código usa as funções, nunca o objeto diretamente.
+
+#### Proteção contra timing attack
+
+```python
+DUMMY_PASSWORD_HASH = _password_hash.hash("dummy-password-for-timing")
+```
+
+No login, se o e-mail não existe, poderíamos responder "erro" na hora. Mas verificar a
+senha de um usuário existente demora uns 50 ms por causa do Argon2. Um atacante
+mediria o tempo de resposta e descobriria quais e-mails estão cadastrados. Por isso,
+quando o usuário não existe, verificamos a senha contra esse hash "falso", gastando o
+mesmo tempo.
+
+#### Criando o JWT 
+
+```python
+def create_token(subject: str, token_type: TokenType, token_version: int) ->
+str:
+    now = datetime.now(UTC)
+    if token_type == "access":
+        expires_at = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    else:
+        expires_at = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    payload = {
+        "sub": subject,
+        # quem é: o id do usuário
+        "type": token_type,# "access" ou "refresh"
+        "ver": token_version,
+        "iat": now,# versão para revogação
+        # emitido em
+        "exp": expires_at,# expira em
+        "jti": uuid.uuid4().hex,
+        # id único do token
+    }
+    return jwt.encode(payload, settings.SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
+
+```
+
+Um JWT tem três partes separadas por ponto: cabeçalho, payload e assinatura. O payload
+não é criptografado, só codificado em base64; qualquer um consegue ler. Por isso nunca
+colocamos dados sensíveis nele.
+A segurança vem da assinatura: ela é calculada com o payload e a SECRET_KEY . Se alguém
+alterar o sub para o id de outro usuário, a assinatura não bate mais e o token é rejeitado.
+Sem a chave secreta, é impossível gerar uma assinatura válida.
+
+#### Por que dois tokens: access e refresh
+
+||Access token|Refresh token|
+|--|--|--|
+|Validade|30 minutos|7 dias|
+|Enviado em|toda requisição ( Authorization: Bearer ... )|só em POST /auth/refresh|
+|Se vazar|o estrago dura no máximo 30 min|permite gerar novos access tokens|
+
+O access token circula muito, então tem vida curta. Quando expira, o front-end usa o
+refresh token para pegar um novo par, sem pedir a senha de novo. A claim type impede
+que alguém use um token no lugar do outro, e os testes verificam exatamente isso.
+
+#### Validando o Token
+
+```python
+def decode_token(token: str) -> dict[str, Any]:
+    return jwt.decode(
+        token,
+        settings.SECRET_KEY.get_secret_value(),
+        algorithms=[settings.JWT_ALGORITHM],
+        options={"require": ["exp", "iat", "sub", "type"]},
+    )
+```
+
+O jwt.decode verifica a assinatura e a expiração, lançando jwt.PyJWTError se algo
+estiver errado. Dois detalhes de segurança: algorithms=[...] é uma lista fixa, o que
+impede o ataque em que o invasor troca o algoritmo para none no cabeçalho; e require
+exige que as claims essenciais existam.
+
+#### Revogação com token_version
+
+JWT tem uma fraqueza: depois de emitido, vale até expirar, porque o servidor não guarda
+nada. Se a senha de alguém foi roubada e ele a troca, o ladrão continuaria com um refresh
+token válido por 7 dias.
+A solução é a claim ver . Ao validar, o service compara payload["ver"] com
+user.token_version no banco. Ao trocar a senha, fazemos user.token_version += 1 .
+Todos os tokens antigos carregam a versão velha e passam a ser rejeitados, sem precisar de lista negra.
+
+#### Token de recuperação de senha
+
+```python
+def hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+def generate_reset_token() -> tuple[str, str]:
+    raw = secrets.token_urlsafe(32)
+    return raw, hash_token(raw)
+
+```
+
+secrets.token_urlsafe(32) gera 32 bytes aleatórios criptograficamente seguros.
+Nunca use o módulo random para isso: ele é previsível. A função retorna uma tupla com
+dois valores: o token bruto vai no link do e-mail, e o hash vai para o banco.
+Aqui SHA-256 é suficiente (diferente das senhas) porque o token já é aleatório e longo:
+não há como adivinhá-lo por força bruta. O hash serve apenas para que um vazamento do
+banco não entregue tokens utilizáveis.
+Verificação: se alguém decodificar um access token no site jwt.io, o que ele consegue
+ver? E o que ele não consegue fazer? Por que trocar a senha desloga o usuário de todos os
+dispositivos?
