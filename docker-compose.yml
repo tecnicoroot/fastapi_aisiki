@@ -1,0 +1,102 @@
+name: fastapi-pro
+
+x-app: &app
+  build:
+    context: .
+    args:
+      INSTALL_DEV: ${INSTALL_DEV:-true}
+  image: fastapi-pro:latest
+  env_file: .env
+  # Hosts internos da rede do compose sobrescrevem os valores "localhost" do .env
+  environment:
+    POSTGRES_HOST: db
+    POSTGRES_PORT: 5432
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    SMTP_HOST: mailpit
+    SMTP_PORT: 1025
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Servidor SMTP fake para desenvolvimento — UI em http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  # Roda migrations + seed uma vez, antes da API e do worker subirem
+  prestart:
+    <<: *app
+    command: sh -c "alembic upgrade head && python -m app.scripts.initial_data"
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./alembic:/app/alembic
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      prestart:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    restart: unless-stopped
+    command: arq app.worker.settings.WorkerSettings --watch app
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+      prestart:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  redis_data:

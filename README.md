@@ -1876,3 +1876,167 @@ app_test depois do teste? O que você precisou mudar no código da aplicação p
 conseguir trocar o Redis pela FakeQueue ?
 
 ### Capítulo 18:Docker, Docker Compose e Makefile
+
+Arquivos: Dockerfile , docker-compose.yml , .dockerignore e Makefile . O objetivo é que qualquer pessoa suba o sistema inteiro com um comando, sem instalar Python, PostgreSQL ou Redis na máquina.
+
+#### Imagem e container
+
+Uma imagem é um pacote congelado com sistema operacional mínimo, Python, bibliotecas e seu código. Um container é uma imagem em execução. A mesma imagem pode gerar vários containers: no nosso projeto, a imagem fastapi-pro gera três (prestart, api e worker), cada um rodando um comando diferente.
+
+##### O Dockerfile em dois estágios
+
+```
+FROM python:3.12-slim AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uvx /bin/
+WORKDIR /app
+ARG INSTALL_DEV=false
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+if [ "$INSTALL_DEV" = "true" ]; then uv sync --frozen --no-install-
+project; \
+else uv sync --frozen --no-install-project --no-dev; fi
+FROM python:3.12-slim AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
+WORKDIR /app
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+COPY --from=builder /app/.venv /app/.venv
+COPY --chown=app:app . .
+USER app
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--
+proxy-headers"]
+```
+
+O multi-stage build usa um estágio para construir e outro para rodar. O builder tem o uv e instala as dependências; o runtime copia só a pasta .venv pronta. O uv não vai para a imagem final, que fica menor.
+
+#### Detalhes que fazem diferença:
+
+- Ordem das cópias e cache: primeiro copiamos só pyproject.toml e uv.lock e
+instalamos as dependências; o código vem depois. O Docker reaproveita camadas que
+não mudaram. Como você altera o código muito mais que as dependências, um rebuild
+leva segundos em vez de minutos.
+- ARG INSTALL_DEV : um parâmetro de build. Em desenvolvimento vale true (para rodar
+pytest dentro do container); em produção, false .
+- PYTHONUNBUFFERED=1 : faz os logs aparecerem imediatamente no docker compose
+logs , sem ficar presos num buffer.
+- PATH com .venv/bin : permite chamar uvicorn , alembic e arq diretamente.
+- Usuário não-root: useradd cria o usuário app e USER app passa a usá-lo. Se alguém
+explorar uma falha na aplicação, não terá poderes de administrador dentro do
+container.
+- --host 0.0.0.0 : dentro do container, localhost só aceitaria conexões do próprio
+container. 0.0.0.0 aceita conexões de fora.
+
+O .dockerignore funciona como o .gitignore : impede que .venv , .git e principalmente o .env sejam copiados para dentro da imagem.
+
+##### O docker-compose.yml
+
+O Compose descreve vários containers que trabalham juntos e cria uma rede privada entre eles. Dentro dessa rede, cada serviço é encontrado pelo seu nome: a API acessa o banco pelo host db , e não por localhost.
+
+|Serviço|Imagem|Função|Porta no seu computador|
+|--|--|--|--|
+|db|postgres:16-alpine|Banco de dados|5432|
+|redis|redis:7-alpine|Fila de tarefas|6379|
+|mailpit|axllent/mailpit|SMTP falso com interface web|8025 (web), 025 (SMTP)|
+|prestart|fastapi-pro|Roda migrations e seed, depois termina|--|
+|api|fastapi-pro|Servidor da API|8000|
+|worker|fastapi-pro|Consome a fila do Redis|--|
+
+#### Âncoras YAML: evitando repetição
+
+```
+x-app: &app
+    build:
+        context: .
+        args:
+            INSTALL_DEV: ${INSTALL_DEV:-true}
+image: fastapi-pro:latest
+env_file: .env
+environment:
+    POSTGRES_HOST: db
+    REDIS_HOST: redis
+    SMTP_HOST: mailpit
+services:
+    api:
+        <<: *app
+        command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+&app define uma âncora (um bloco com nome) e <<: *app cola esse bloco dentro de outro serviço. Os três serviços da aplicação compartilham a mesma configuração e só mudam o command . Blocos que começam com x- são ignorados pelo Compose, servindo só como modelo.
+O env_file: .env carrega suas variáveis, e o environment sobrescreve algumas delas.
+Por isso o mesmo .env com POSTGRES_HOST=localhost funciona tanto rodando direto no seu computador quanto no Docker. A sintaxe ${INSTALL_DEV:-true} significa "use a variável INSTALL_DEV , ou true se ela não existir".
+
+#### Healthchecks e ordem de inicialização
+
+```
+db:
+    healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d
+$${POSTGRES_DB}"]
+    interval: 5s
+    retries: 10
+api:
+    depends_on:
+        db:
+            condition: service_healthy
+        redis:
+            condition: service_healthy
+        prestart:
+            condition: service_completed_successfully
+```
+
+O container do Postgres "liga" em um segundo, mas o banco leva alguns segundos para aceitar conexões. O healthcheck roda pg_isready periodicamente e só marca o serviço como saudável quando o banco responde. O $$ escapa o $ para que a variável seja lida dentro do container, e não pelo Compose.
+A cadeia de inicialização fica assim: db e redis ficam saudáveis; então prestart aplica as migrations e o seed e termina; só depois que ele termina com sucesso ( service_completed_successfully ) a api e o worker sobem. Isso garante que a API nunca inicie com o banco desatualizado.
+
+#### Volumes
+
+```
+db:
+    volumes:
+        - postgres_data:/var/lib/postgresql/data
+api:
+    volumes:
+        - ./app:/app/app
+```
+
+Há dois tipos aqui. O volume nomeado ( postgres_data ) guarda os dados do banco fora
+do container: você pode destruir e recriar o container sem perder dados. Só make clean
+( docker compose down -v ) os apaga.
+O bind mount ( ./app:/app/app ) espelha a pasta do seu computador dentro do
+container. Junto com o --reload do Uvicorn e o --watch do ARQ, isso faz o servidor
+reiniciar sozinho a cada arquivo salvo, sem rebuild. Em produção, esses mounts e o --
+reload são removidos.
+
+#### O Makefile
+
+```
+up: ## Sobe toda a stack (api, worker, postgres, redis, mailpit)
+    $(DC) up -d --build
+migration: ## Cria nova migration (ex.: make migration m="add phone to
+users")
+    $(DC) exec -u $$(id -u):$$(id -g) api alembic revision --autogenerate
+-m "$(m)"
+
+```
+
+O Makefile é um "menu de atalhos": make up em vez de lembrar docker compose up -d --build . O texto após ## é a descrição que aparece em make help . $(m) lê o parâmetro passado na linha de comando. O -u $$(id -u):$$(id -g) roda o comando com o seu usuário, para que o arquivo de migration gerado no container pertença a você e não ao root.
+
+|Comando|O que faz|
+|--|--|
+|make up|Constrói as imagens e sobe tudo em segundo plano|
+|make logs s=worker|Acompanha os logs de um serviço|
+|make migration m="..."|Gera uma migration a partir dos models|
+|make migrate|Aplica migrations e seed|
+|make test|Roda os testes dentro do container|
+|make check|Ruff, mypy e testes, igual ao CI|
+|make clean|Derruba tudo e apaga os dados|
+
+#### Pre-commit e CI
+
+O .pre-commit-config.yaml roda Ruff e mypy automaticamente a cada git commit ,
+bloqueando código fora do padrão antes que ele chegue ao repositório. Ative com uv run
+pre-commit install .
+O .github/workflows/ci.yml faz o mesmo no GitHub a cada push: sobe um Postgres,
+instala as dependências com uv sync --frozen , roda lint, tipos, migrations e testes. Um
+pull request com qualquer falha aparece em vermelho.
+Verificação: por que a API usa o host db e não localhost para falar com o banco? O que
+aconteceria se o prestart falhasse numa migration?
+
