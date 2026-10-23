@@ -6,10 +6,10 @@ from urllib.parse import urlencode
 import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
-from app.core.exceptions import AppError, AuthenticationError, ConflictError
-from app.core.queue import TaskName, TaskQueue
-from app.core.security import (
+from fastapi_aisiki.core.config import settings
+from fastapi_aisiki.core.exceptions import AppError, AuthenticationError, ConflictError
+from fastapi_aisiki.core.queue import TaskName, TaskQueue
+from fastapi_aisiki.core.security import (
     DUMMY_PASSWORD_HASH,
     TokenType,
     create_token,
@@ -19,13 +19,13 @@ from app.core.security import (
     hash_token,
     verify_password,
 )
-from app.db.base import utcnow
-from app.models import PasswordResetToken, User
-from app.repositories.password_reset import PasswordResetRepository
-from app.repositories.profile import ProfileRepository
-from app.repositories.user import UserRepository
-from app.schemas.auth import TokenPair
-from app.schemas.user import UserCreate
+from fastapi_aisiki.db.base import utcnow
+from fastapi_aisiki.models import PasswordResetToken, User
+from fastapi_aisiki.repositories.password_reset import PasswordResetRepository
+from fastapi_aisiki.repositories.profile import ProfileRepository
+from fastapi_aisiki.repositories.user import UserRepository
+from fastapi_aisiki.schemas.auth import TokenPair
+from fastapi_aisiki.schemas.user import UserCreate
 
 logger = logging.getLogger(__name__)
 

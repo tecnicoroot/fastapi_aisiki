@@ -2,7 +2,7 @@ from email.message import EmailMessage
 
 import aiosmtplib
 
-from app.core.config import settings
+from fastapi_aisiki.core.config import settings
 
 
 async def send_email(*, to: str, subject: str, text: str, html: str | None = None) -> None:

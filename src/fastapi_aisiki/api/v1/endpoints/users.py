@@ -2,10 +2,10 @@ import uuid
 
 from fastapi import APIRouter, status
 
-from app.api.deps import AdminUser, CurrentUser, UserServiceDep
-from app.models import User
-from app.schemas.common import Page, PageQuery
-from app.schemas.user import UserAdminUpdate, UserRead, UserUpdateMe
+from fastapi_aisiki.api.deps import AdminUser, CurrentUser, UserServiceDep
+from fastapi_aisiki.models import User
+from fastapi_aisiki.schemas.common import Page, PageQuery
+from fastapi_aisiki.schemas.user import UserAdminUpdate, UserRead, UserUpdateMe
 
 router = APIRouter(prefix="/users", tags=["users"])
 

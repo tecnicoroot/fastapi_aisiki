@@ -3,11 +3,11 @@ from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError, ConflictError, NotFoundError
-from app.models import User
-from app.repositories.profile import ProfileRepository
-from app.repositories.user import UserRepository
-from app.schemas.user import UserAdminUpdate, UserUpdateMe
+from fastapi_aisiki.core.exceptions import AppError, ConflictError, NotFoundError
+from fastapi_aisiki.models import User
+from fastapi_aisiki.repositories.profile import ProfileRepository
+from fastapi_aisiki.repositories.user import UserRepository
+from fastapi_aisiki.schemas.user import UserAdminUpdate, UserUpdateMe
 
 
 class UserService:

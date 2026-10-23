@@ -2,10 +2,10 @@ import uuid
 
 from fastapi import APIRouter, status
 
-from app.api.deps import AdminUser, CurrentUser, ProfileServiceDep
-from app.models import Profile
-from app.schemas.common import Page, PageQuery
-from app.schemas.profile import ProfileCreate, ProfileRead, ProfileUpdate
+from fastapi_aisiki.api.deps import AdminUser, CurrentUser, ProfileServiceDep
+from fastapi_aisiki.models import Profile
+from fastapi_aisiki.schemas.common import Page, PageQuery
+from fastapi_aisiki.schemas.profile import ProfileCreate, ProfileRead, ProfileUpdate
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 

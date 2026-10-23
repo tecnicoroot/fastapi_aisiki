@@ -1,7 +1,7 @@
 import jwt
 import pytest
 
-from app.core.security import (
+from fastapi_aisiki.core.security import (
     create_token,
     decode_token,
     generate_reset_token,

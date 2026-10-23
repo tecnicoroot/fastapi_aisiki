@@ -5,14 +5,14 @@ from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
-from app.core.exceptions import PermissionDeniedError
-from app.core.queue import TaskQueue
-from app.db.session import get_session
-from app.models import User
-from app.services.auth import AuthService
-from app.services.profile import ProfileService
-from app.services.user import UserService
+from fastapi_aisiki.core.config import settings
+from fastapi_aisiki.core.exceptions import PermissionDeniedError
+from fastapi_aisiki.core.queue import TaskQueue
+from fastapi_aisiki.db.session import get_session
+from fastapi_aisiki.models import User
+from fastapi_aisiki.services.auth import AuthService
+from fastapi_aisiki.services.profile import ProfileService
+from fastapi_aisiki.services.user import UserService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
 

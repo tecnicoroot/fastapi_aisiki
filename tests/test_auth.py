@@ -2,8 +2,8 @@ from urllib.parse import parse_qs, urlparse
 
 from httpx import AsyncClient
 
-from app.core.queue import TaskName
-from app.models import User
+from fastapi_aisiki.core.queue import TaskName
+from fastapi_aisiki.models import User
 from tests.conftest import DEFAULT_PASSWORD, FakeQueue, auth_headers
 
 API = "/api/v1"

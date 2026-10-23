@@ -9,12 +9,14 @@ x-app: &app
   env_file: .env
   # Hosts internos da rede do compose sobrescrevem os valores "localhost" do .env
   environment:
+    PYTHONPATH: /app/src
     POSTGRES_HOST: db
     POSTGRES_PORT: 5432
     REDIS_HOST: redis
     REDIS_PORT: 6379
     SMTP_HOST: mailpit
     SMTP_PORT: 1025
+    COVERAGE_FILE: /tmp/.coverage
 
 services:
   db:
@@ -25,7 +27,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-app}
     ports:
-      - "5432:5432"
+      - "54339:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -59,8 +61,11 @@ services:
   # Roda migrations + seed uma vez, antes da API e do worker subirem
   prestart:
     <<: *app
-    command: sh -c "alembic upgrade head && python -m app.scripts.initial_data"
+    command: sh -c "alembic upgrade head && python -m fastapi_aisiki.scripts.initial_data"
     restart: "no"
+    volumes:
+      - ./src:/app/src
+      - ./alembic:/app/alembic
     depends_on:
       db:
         condition: service_healthy
@@ -68,11 +73,11 @@ services:
   api:
     <<: *app
     restart: unless-stopped
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn fastapi_aisiki.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app/app
+      - ./src:/app/src
       - ./tests:/app/tests
       - ./alembic:/app/alembic
     depends_on:
@@ -86,9 +91,9 @@ services:
   worker:
     <<: *app
     restart: unless-stopped
-    command: arq app.worker.settings.WorkerSettings --watch app
+    command: arq fastapi_aisiki.worker.settings.WorkerSettings --watch src
     volumes:
-      - ./app:/app/app
+      - ./src:/app/src
     depends_on:
       redis:
         condition: service_healthy

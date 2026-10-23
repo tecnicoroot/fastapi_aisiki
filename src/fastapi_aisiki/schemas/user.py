@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
-from app.schemas.profile import ProfileRead
+from fastapi_aisiki.schemas.profile import ProfileRead
 
 NormalizedEmail = Annotated[EmailStr, AfterValidator(lambda v: v.lower())]
 Password = Annotated[str, Field(min_length=8, max_length=128)]

@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from app.schemas.user import NormalizedEmail, Password
+from fastapi_aisiki.schemas.user import NormalizedEmail, Password
 
 
 class TokenPair(BaseModel):

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, health, profiles, users
+from fastapi_aisiki.api.v1.endpoints import auth, health, profiles, users
 
 api_router = APIRouter()
 api_router.include_router(health.router)

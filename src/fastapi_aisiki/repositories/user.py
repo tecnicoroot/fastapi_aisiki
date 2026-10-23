@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User
+from fastapi_aisiki.models import User
 
 
 class UserRepository:

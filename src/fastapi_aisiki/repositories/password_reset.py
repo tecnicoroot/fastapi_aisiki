@@ -3,8 +3,8 @@ import uuid
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.base import utcnow
-from app.models import PasswordResetToken
+from fastapi_aisiki.db.base import utcnow
+from fastapi_aisiki.models import PasswordResetToken
 
 
 class PasswordResetRepository:

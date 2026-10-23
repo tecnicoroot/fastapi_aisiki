@@ -3,17 +3,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.api.deps import AuthServiceDep, CurrentUser
-from app.models import User
-from app.schemas.auth import (
+from fastapi_aisiki.api.deps import AuthServiceDep, CurrentUser
+from fastapi_aisiki.models import User
+from fastapi_aisiki.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
     RefreshRequest,
     ResetPasswordRequest,
     TokenPair,
 )
-from app.schemas.common import Message
-from app.schemas.user import UserCreate, UserRead
+from fastapi_aisiki.schemas.common import Message
+from fastapi_aisiki.schemas.user import UserCreate, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

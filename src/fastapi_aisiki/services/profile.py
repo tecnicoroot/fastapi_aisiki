@@ -3,10 +3,10 @@ from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, NotFoundError
-from app.models import Profile
-from app.repositories.profile import ProfileRepository
-from app.schemas.profile import ProfileCreate, ProfileUpdate
+from fastapi_aisiki.core.exceptions import ConflictError, NotFoundError
+from fastapi_aisiki.models import Profile
+from fastapi_aisiki.repositories.profile import ProfileRepository
+from fastapi_aisiki.schemas.profile import ProfileCreate, ProfileUpdate
 
 
 class ProfileService:

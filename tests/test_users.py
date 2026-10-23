@@ -2,7 +2,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Profile, User
+from fastapi_aisiki.models import Profile, User
 from tests.conftest import UserFactory, auth_headers
 
 API = "/api/v1"

@@ -1,6 +1,6 @@
 from httpx import AsyncClient
 
-from app.models import User
+from fastapi_aisiki.models import User
 from tests.conftest import auth_headers
 
 API = "/api/v1"

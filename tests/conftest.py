@@ -16,14 +16,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app import models  # noqa: F401
-from app.api.deps import get_queue
-from app.core.config import settings
-from app.core.security import create_token, hash_password
-from app.db.base import Base
-from app.db.session import get_session
-from app.main import app as fastapi_app
-from app.models import Profile, User
+from fastapi_aisiki import models  # noqa: F401
+from fastapi_aisiki.api.deps import get_queue
+from fastapi_aisiki.core.config import settings
+from fastapi_aisiki.core.security import create_token, hash_password
+from fastapi_aisiki.db.base import Base
+from fastapi_aisiki.db.session import get_session
+from fastapi_aisiki.main import app as fastapi_app
+from fastapi_aisiki.models import Profile, User
 
 DEFAULT_PASSWORD = "Senha@12345"
 

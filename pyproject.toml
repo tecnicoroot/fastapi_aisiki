@@ -39,6 +39,8 @@ dev = [
 line-length = 100
 target-version = "py312"
 extend-exclude = ["alembic/versions"]
+src = ["src", "tests"]
+
 
 [tool.ruff.lint]
 select = [
@@ -87,9 +89,9 @@ asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers"
 
 [tool.coverage.run]
-source = ["app"]
+source = ["fastapi_aisiki"]
 concurrency = ["greenlet", "thread"]
-omit = ["app/scripts/*", "app/worker/settings.py"]
+omit = ["src/scripts/*", "src/fastapi_aisiki/worker/settings.py"]
 
 [tool.coverage.report]
 show_missing = true
