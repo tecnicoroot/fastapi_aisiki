@@ -557,9 +557,7 @@ Esse arquivo parece inofensivo, mas é essencial. Uma tabela só entra no Base.m
 Verificação: o que acontece no banco quando você faz user.profiles.append(p) e
 depois commit() ? Por que lazy="selectin" e não o padrão?
 
-### Capítulo 9
-
-#### Migrations com Alembic
+### Capítulo 9: Migrations com Alembic
 
 Como já instalamos atraves do nosso pyproject, não será necessário utilizar o comando:
 
@@ -1571,4 +1569,119 @@ O router.py junta todos os routers da versão 1. No main.py , ele recebe o prefi
 clientes antigos continuam funcionando em /api/v1 .
 Verificação: qual a diferença entre receber 401 e 403? O que aconteceria se você
 removesse o parâmetro _: AdminUser de list_users?
+
+### Capítulo 16: main.py e o ciclo de vida da aplicação
+
+Arquivo: app/main.py . É aqui que todas as peças se encontram. O arquivo é curto porque
+cada responsabilidade já está no seu lugar.
+
+#### O lifespan: o que acontece ao ligar e desligar
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    setup_logging()
+    redis_pool = await create_pool(get_redis_settings())
+    app.state.queue = ArqTaskQueue(redis_pool)
+    yield
+    await redis_pool.aclose()
+    await engine.dispose()
+```
+
+O lifespan é dividido pelo yield em duas metades:
+
+- Antes do yield roda uma vez, quando o servidor inicia: configura o log, abre o pool de
+conexões com o Redis e guarda a fila em app.state , um espaço para objetos que
+vivem enquanto a aplicação estiver no ar.
+- Depois do yield roda uma vez, quando o servidor desliga: fecha as conexões do Redis
+e do banco de forma limpa.
+
+O decorador @asynccontextmanager transforma essa função num gerenciador de
+contexto, o mesmo conceito do async with . Por que não abrir a conexão com o Redis em
+cada requisição? Pelo mesmo motivo do pool do banco: abrir conexão é caro, e
+reaproveitá-la é muito mais rápido.
+
+#### A fábrica da aplicação
+
+```python
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title=settings.PROJECT_NAME,
+        debug=settings.DEBUG,
+        lifespan=lifespan,
+        openapi_url=None if settings.is_production else f"{settings.API_V1_PREFIX}/openapi.json",
+        docs_url=None if settings.is_production else "/docs",
+        redoc_url=None,
+    )
+
+    if settings.CORS_ORIGINS:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.CORS_ORIGINS,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    register_exception_handlers(app)
+    app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+    return app
+```
+
+O padrão application factory (uma função que cria e devolve a aplicação) facilita testes e
+permite criar variações da app com configurações diferentes. As etapas:
+
+- **Documentação desligada em produção**: docs_url=None remove o Swagger. Em
+produção, expor o mapa completo da API ajuda um atacante. A expressão X if
+condição else Y é o operador ternário do Python.
+- **CORS**: navegadores bloqueiam, por segurança, que um site em localhost:3000
+chame uma API em localhost:8000 . O CORSMiddleware diz ao navegador quais
+origens são permitidas. A lista vem do .env , então em produção você coloca só o
+domínio real do front-end.
+- **Handlers** de exceção: conecta o tradutor de AppError do capítulo 9.
+- **Routers**: monta todas as rotas sob /api/v1 .
+A variável app no final é o que o Uvicorn procura quando você roda uvicorn
+app.main:app : módulo app.main , variável app.
+
+#### Um middleware, em uma frase
+
+Middleware é um código que envolve todas as requisições: roda antes do endpoint e
+depois dele. O CORS é um exemplo; outros comuns são log de tempo de resposta,
+compressão gzip e limite de requisições por IP.
+
+#### O script de seed
+
+Arquivo: app/scripts/initial_data.py . Ele cria os perfis admin e user e o primeiro
+superusuário. Sem ele, o sistema nasceria sem ninguém capaz de administrar.
+
+```python
+for name, description in DEFAULT_PROFILES.items():
+    profile = await profiles_repo.get_by_name(name)
+    if profile is None:
+    profile = Profile(name=name, description=description)
+    profiles_repo.add(profile)
+    profiles[name] = profile
+if await users_repo.get_by_email(settings.FIRST_SUPERUSER_EMAIL) is None:
+    users_repo.add(User(..., is_superuser=True, profiles=[profiles["admin"],profiles["user"]]))
+await session.commit()
+```
+
+O ponto-chave é que o script é idempotente: só cria o que ainda não existe. Ele pode
+rodar a cada deploy sem duplicar nada, e é exatamente isso que o serviço prestart do
+Docker faz. Note também que ele reaproveita os repositories, sem escrever SQL próprio.
+
+```python
+if __name__ == "__main__":
+    setup_logging()
+    asyncio.run(seed())
+```
+
+O bloco if __name__ == "__main__" só executa quando o arquivo é rodado diretamente
+( python -m app.scripts.initial_data ), e não quando é importado. O asyncio.run
+cria um loop de eventos para executar uma função async fora do FastAPI.
+Verificação: o que aconteceria se você abrisse a conexão com o Redis dentro de cada
+endpoint em vez do lifespan? Por que o seed precisa ser idempotente?
+
+### Capítulo 17: Testes automatizados
 
