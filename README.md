@@ -1685,3 +1685,194 @@ endpoint em vez do lifespan? Por que o seed precisa ser idempotente?
 
 ### Capítulo 17: Testes automatizados
 
+Arquivos em tests/ . Os testes chamam a API de verdade, com um PostgreSQL de
+verdade, e mesmo assim cada teste é totalmente isolado dos outros. Entender o
+conftest.py é entender como isso é possível.
+
+#### Fixtures: o conceito central do pytest
+
+Uma fixture é uma função que prepara algo que um teste precisa. O teste declara o nome
+da fixture como parâmetro, e o pytest a executa e entrega o resultado:
+
+```python
+@pytest.fixture
+def fake_queue() -> FakeQueue:
+    return FakeQueue()
+async def test_algo(fake_queue: FakeQueue) -> None:
+fake_queue() antes
+# o pytest chama
+...
+```
+
+É a mesma ideia do Depends do FastAPI. Fixtures também podem depender de outras
+fixtures, formando uma cadeia. Quando usam yield , o código após o yield roda depois
+do teste, para limpar.
+
+#### Primeira coisa do conftest: o ambiente
+
+```python
+import os
+os.environ["ENVIRONMENT"] = "test"
+os.environ["POSTGRES_DB"] = os.environ.get("TEST_POSTGRES_DB", "app_test")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-com-pelo-menos-32-
+caracteres")
+from app.core.config import settings
+# só agora!
+...
+```
+
+Lembra que o settings é criado no momento do import (capítulo 2)? Por isso as variáveis
+são alteradas antes de importar qualquer coisa de app . O resultado: os testes usam o
+banco app_test e nunca tocam no banco de desenvolvimento app.
+
+#### Preparando o banco uma vez por sessão de testes
+
+```python
+@pytest.fixture(scope="session", autouse=True)
+def _setup_database() -> None:
+    asyncio.run(_prepare_database())
+```
+
+- scope="session" faz a fixture rodar uma só vez para todos os testes, e não uma vez
+por teste.
+- autouse=True faz ela rodar sem que nenhum teste precise pedi-la.
+_prepare_database conecta ao banco administrativo postgres , cria o app_test se não
+existir, e então faz drop_all seguido de create_all . Cada execução da suíte começa
+com tabelas limpas e iguais aos models.
+
+#### O truque do isolamento: transação revertida
+
+```python
+@pytest.fixture
+    async def db_session() -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        session = AsyncSession(
+            bind=connection, expire_on_commit=False,
+                join_transaction_mode="create_savepoint"
+            )
+        session.add_all([Profile(name="admin"), Profile(name="user")])
+        await session.flush()
+        try:
+            yield session
+        finally:
+            await session.close()
+            await transaction.rollback()
+    await engine.dispose()
+```
+
+Este é o trecho mais engenhoso do projeto. O problema: os services fazem commit() , e
+um commit grava de verdade. Como impedir que um teste deixe lixo para o próximo?
+
+1. Abrimos uma conexão e iniciamos uma transação externa ( connection.begin() ).
+2. Criamos a sessão em cima dessa conexão com join_transaction_mode="create_savepoint" . Agora, quando o service chama
+commit() , o SQLAlchemy não finaliza a transação externa; ele só fecha um savepoint
+(um ponto de salvamento interno).
+3. Criamos os perfis padrão. O flush() envia o INSERT ao banco sem finalizar nada.
+4. O teste roda, com commits, consultas e tudo funcionando normalmente.
+5. No finally , damos rollback() na transação externa. Tudo o que o teste fez
+desaparece, como se nunca tivesse acontecido.
+
+Resultado: testes rápidos (não recriam tabelas a cada vez) e totalmente independentes. O NullPool evita que conexões sobrevivam entre testes.
+
+#### O cliente HTTP e a troca de dependências
+
+```python
+@pytest.fixture
+async def client(db_session: AsyncSession, fake_queue: FakeQueue) ->
+AsyncIterator[AsyncClient]:
+    async def _override_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+    fastapi_app.dependency_overrides[get_session] = _override_session
+    fastapi_app.dependency_overrides[get_queue] = lambda: fake_queue
+    async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as ac:
+    yield ac
+    fastapi_app.dependency_overrides.clear()
+```
+
+Aqui o investimento em injeção de dependências se paga. dependency_overrides é um
+dicionário do FastAPI: "quando alguém pedir get_session , use esta outra função".
+Trocamos a sessão real pela sessão do teste e a fila real pela FakeQueue . Nenhuma linha do código da aplicação foi alterada para ser testável.
+
+O ASGITransport faz o httpx conversar com a aplicação diretamente na memória, sem
+abrir porta de rede. As requisições passam por todo o caminho real: validação,
+dependências, services, banco. O clear() ao final evita que a troca vaze para outros
+testes.
+
+#### A FakeQueue
+
+```python
+class FakeQueue:
+    def __init__(self) -> None:
+        self.jobs: list[tuple[str, dict[str, Any]]] = []
+    async def enqueue(self, function: str, **kwargs: Any) -> None:
+        self.jobs.append((function, kwargs))
+```
+
+Ela segue o protocolo TaskQueue (tem um enqueue com a assinatura certa), então o
+mypy aceita no lugar da fila real. Em vez de mandar ao Redis, guarda numa lista, e os
+testes inspecionam essa lista.
+
+#### Factory de usuários e helpers
+
+```python
+@pytest.fixture
+def user_factory(db_session: AsyncSession) -> UserFactory:
+    async def _create(*, email: str | None = None, is_superuser: bool =
+False, profiles: list[str] | None = None) -> User:
+    ...
+    return _create
+def auth_headers(user: User) -> dict[str, str]:
+    token = create_token(str(user.id), "access", user.token_version)
+    return {"Authorization": f"Bearer {token}"}
+
+```
+
+Uma factory é uma fixture que devolve uma função, e não um objeto pronto. Assim o teste
+cria quantos usuários quiser, cada um com as características necessárias: await
+user_factory(profiles=["admin"]) . O auth_headers gera o token diretamente,
+pulando o login, para que testes de usuários não dependam do endpoint de login.
+
+#### Anatomia de um bom teste
+
+```python
+async def test_password_recovery_flow(client: AsyncClient, user: User, fake_queue: FakeQueue) -> None:
+    old_headers = auth_headers(user)
+    response = await client.post(f"{API}/auth/forgot-password", json=
+{"email": user.email})
+    assert response.status_code == 202
+    task, kwargs = fake_queue.jobs[-1]
+    assert task == TaskName.SEND_PASSWORD_RESET_EMAIL
+    token = parse_qs(urlparse(kwargs["reset_url"]).query)["token"][0]
+    response = await client.post(f"{API}/auth/reset-password", json={"token":
+    token, "new_password": "NovaSenha@1"})
+    assert response.status_code == 200
+    await _login(client, user.email, "NovaSenha@1")
+    assert (await client.get(f"{API}/users/me",
+headers=old_headers)).status_code == 401
+```
+
+Este teste conta uma história completa e verifica quatro coisas: o pedido é aceito, um e-
+mail foi enfileirado, o token do link funciona, e os tokens antigos foram revogados. Repare
+como ele extrai o token do link dentro do job enfileirado, simulando o usuário clicando no
+e-mail. fake_queue.jobs[-1] pega o último item da lista.
+
+O projeto também testa os caminhos de erro, que são onde mais aparecem bugs: e-mail
+duplicado (409), senha curta (422), usuário comum tentando listar usuários (403), token
+de recuperação reutilizado (400), access token usado como refresh (401).
+
+#### Rodando
+
+```python
+make test
+# dentro do container
+uv run pytest --cov # localmente
+uv run pytest tests/test_auth.py -k refresh -v # só os testes com "refresh" no nome
+```
+
+Verificação: se o service faz commit() , por que os dados não ficam gravados no
+app_test depois do teste? O que você precisou mudar no código da aplicação para
+conseguir trocar o Redis pela FakeQueue ?
+
+### Capítulo 18:Docker, Docker Compose e Makefile
